@@ -4,3 +4,9 @@ mediapipe
 psutil
 pyrealsense2
 torch
+
+# ---- TensorFlow Lite (MobileFaceNet embeddings) ----
+# Laptop (macOS): use full TensorFlow (provides `tf.lite.Interpreter`)
+tensorflow>=2.14.0; platform_system=="Darwin"
+# Raspberry Pi (ARM Linux): use the lightweight TFLite runtime instead of full TF
+tflite-runtime>=2.14.0; platform_system!="Darwin"
