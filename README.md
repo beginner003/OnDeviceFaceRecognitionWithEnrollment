@@ -11,8 +11,9 @@ Please read `IMPLEMENTATION_PLAN.md` (module breakdown, architecture decisions, 
 
 ## Create a virtual environment (for testing)
 ```bash
-python3 -m venv venv
+python3.11 -m venv venv
 source venv/bin/activate
+python --version  # expect Python 3.11.x
 pip install -r requirements.txt
 ```
 
