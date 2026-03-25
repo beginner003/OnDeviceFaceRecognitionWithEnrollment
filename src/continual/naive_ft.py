@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import torch
@@ -11,6 +11,7 @@ from torch.optim import SGD
 from torch.utils.data import DataLoader, TensorDataset
 
 from src.continual.classifier import CosineLinear
+from src.memory.exemplar_store import ExemplarStore
 
 
 @dataclass
@@ -89,3 +90,29 @@ def incremental_train_naive(
             optimizer.step()
 
     return classifier
+
+
+@dataclass
+class NaiveFTStrategy:
+    """Protocol-compatible wrapper for the naive fine-tuning baseline."""
+
+    config: NaiveFTConfig = field(default_factory=NaiveFTConfig)
+    device: torch.device | str | None = None
+    init_new_class_from_mean: bool = True
+
+    def update(
+        self,
+        classifier: CosineLinear,
+        store: ExemplarStore,
+        new_embeddings: np.ndarray,
+        identity: str,
+    ) -> CosineLinear:
+        # `store` and `identity` are kept in signature for protocol consistency.
+        _ = (store, identity)
+        return incremental_train_naive(
+            classifier=classifier,
+            new_embeddings=new_embeddings,
+            init_new_class_from_mean=self.init_new_class_from_mean,
+            config=self.config,
+            device=self.device,
+        )

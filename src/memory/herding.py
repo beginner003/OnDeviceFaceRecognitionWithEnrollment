@@ -55,3 +55,10 @@ def herding_select(embeddings: np.ndarray, k: int) -> Tuple[np.ndarray, np.ndarr
     x = _validate_embeddings(embeddings)
     return x[idx], idx
 
+
+class HerdingSelector:
+    """Protocol-compatible selector wrapper around herding selection."""
+
+    def select(self, embeddings: np.ndarray, k: int) -> Tuple[np.ndarray, np.ndarray]:
+        return herding_select(embeddings=embeddings, k=k)
+
