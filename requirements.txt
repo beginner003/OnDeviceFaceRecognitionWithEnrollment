@@ -1,0 +1,6 @@
+numpy
+opencv-python-headless
+mediapipe
+psutil
+pyrealsense2
+torch

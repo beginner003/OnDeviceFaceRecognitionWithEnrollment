@@ -1,0 +1,25 @@
+# Python / runtime cache
+__pycache__/
+*.py[cod]
+*/*.py[cod]
+
+# Test caches
+.pytest_cache/
+
+# Virtual environments (local/dev)
+venv/
+.venv/
+.venv*/
+.venv311/
+.env/
+
+# Cursor (local-only authoring artifacts)
+.cursor/rules/
+.cursor/skills/
+
+# macOS
+.DS_Store
+
+# Logs (optional)
+*.log
+

@@ -1,0 +1,181 @@
+{
+  "name": "supertask_8_2",
+  "source": "IMPLEMENTATION_PLAN.md §8.2",
+  "scenario": {
+    "type": "on_device_evaluation",
+    "task_grouping": "task0_to_task4_is_one_combined_supertask"
+  },
+  "tasks": {
+    "task0": ["n000001", "n000009", "n000029", "n000040", "n000078"],
+    "task1": ["n000082"],
+    "task2": ["n000106"],
+    "task3": ["n000129"],
+    "task4": ["n000148", "n000149"]
+  },
+  "identities": [
+    {
+      "identity": "n000001",
+      "task": "task0",
+      "image_paths": [
+        "data/val/n000001/0001_01.jpg",
+        "data/val/n000001/0002_01.jpg",
+        "data/val/n000001/0003_01.jpg",
+        "data/val/n000001/0004_01.jpg",
+        "data/val/n000001/0005_01.jpg",
+        "data/val/n000001/0006_01.jpg",
+        "data/val/n000001/0007_01.jpg",
+        "data/val/n000001/0008_01.jpg",
+        "data/val/n000001/0009_01.jpg",
+        "data/val/n000001/0010_01.jpg"
+      ]
+    },
+    {
+      "identity": "n000009",
+      "task": "task0",
+      "image_paths": [
+        "data/val/n000009/0001_01.jpg",
+        "data/val/n000009/0003_01.jpg",
+        "data/val/n000009/0004_01.jpg",
+        "data/val/n000009/0005_01.jpg",
+        "data/val/n000009/0006_01.jpg",
+        "data/val/n000009/0008_01.jpg",
+        "data/val/n000009/0009_01.jpg",
+        "data/val/n000009/0010_01.jpg",
+        "data/val/n000009/0011_01.jpg",
+        "data/val/n000009/0012_01.jpg"
+      ]
+    },
+    {
+      "identity": "n000029",
+      "task": "task0",
+      "image_paths": [
+        "data/val/n000029/0001_01.jpg",
+        "data/val/n000029/0002_01.jpg",
+        "data/val/n000029/0003_01.jpg",
+        "data/val/n000029/0004_01.jpg",
+        "data/val/n000029/0005_01.jpg",
+        "data/val/n000029/0006_01.jpg",
+        "data/val/n000029/0007_02.jpg",
+        "data/val/n000029/0008_05.jpg",
+        "data/val/n000029/0009_01.jpg",
+        "data/val/n000029/0010_01.jpg"
+      ]
+    },
+    {
+      "identity": "n000040",
+      "task": "task0",
+      "image_paths": [
+        "data/val/n000040/0001_01.jpg",
+        "data/val/n000040/0002_01.jpg",
+        "data/val/n000040/0003_01.jpg",
+        "data/val/n000040/0004_01.jpg",
+        "data/val/n000040/0005_01.jpg",
+        "data/val/n000040/0006_01.jpg",
+        "data/val/n000040/0007_01.jpg",
+        "data/val/n000040/0008_01.jpg",
+        "data/val/n000040/0009_01.jpg",
+        "data/val/n000040/0010_01.jpg"
+      ]
+    },
+    {
+      "identity": "n000078",
+      "task": "task0",
+      "image_paths": [
+        "data/val/n000078/0002_02.jpg",
+        "data/val/n000078/0003_01.jpg",
+        "data/val/n000078/0004_01.jpg",
+        "data/val/n000078/0005_01.jpg",
+        "data/val/n000078/0006_03.jpg",
+        "data/val/n000078/0008_01.jpg",
+        "data/val/n000078/0009_01.jpg",
+        "data/val/n000078/0010_01.jpg",
+        "data/val/n000078/0011_01.jpg",
+        "data/val/n000078/0012_03.jpg"
+      ]
+    },
+    {
+      "identity": "n000082",
+      "task": "task1",
+      "image_paths": [
+        "data/val/n000082/0001_01.jpg",
+        "data/val/n000082/0001_02.jpg",
+        "data/val/n000082/0002_01.jpg",
+        "data/val/n000082/0002_02.jpg",
+        "data/val/n000082/0003_01.jpg",
+        "data/val/n000082/0003_03.jpg",
+        "data/val/n000082/0004_01.jpg",
+        "data/val/n000082/0004_05.jpg",
+        "data/val/n000082/0005_01.jpg",
+        "data/val/n000082/0006_02.jpg"
+      ]
+    },
+    {
+      "identity": "n000106",
+      "task": "task2",
+      "image_paths": [
+        "data/val/n000106/0001_03.jpg",
+        "data/val/n000106/0002_01.jpg",
+        "data/val/n000106/0003_01.jpg",
+        "data/val/n000106/0004_01.jpg",
+        "data/val/n000106/0005_01.jpg",
+        "data/val/n000106/0006_01.jpg",
+        "data/val/n000106/0007_01.jpg",
+        "data/val/n000106/0008_01.jpg",
+        "data/val/n000106/0009_01.jpg",
+        "data/val/n000106/0010_01.jpg"
+      ]
+    },
+    {
+      "identity": "n000129",
+      "task": "task3",
+      "image_paths": [
+        "data/val/n000129/0001_01.jpg",
+        "data/val/n000129/0002_01.jpg",
+        "data/val/n000129/0003_01.jpg",
+        "data/val/n000129/0004_01.jpg",
+        "data/val/n000129/0005_01.jpg",
+        "data/val/n000129/0006_01.jpg",
+        "data/val/n000129/0007_01.jpg",
+        "data/val/n000129/0008_01.jpg",
+        "data/val/n000129/0009_01.jpg",
+        "data/val/n000129/0010_01.jpg"
+      ]
+    },
+    {
+      "identity": "n000148",
+      "task": "task4",
+      "image_paths": [
+        "data/val/n000148/0001_01.jpg",
+        "data/val/n000148/0002_01.jpg",
+        "data/val/n000148/0004_01.jpg",
+        "data/val/n000148/0005_01.jpg",
+        "data/val/n000148/0006_01.jpg",
+        "data/val/n000148/0007_01.jpg",
+        "data/val/n000148/0008_01.jpg",
+        "data/val/n000148/0009_01.jpg",
+        "data/val/n000148/0010_01.jpg",
+        "data/val/n000148/0012_01.jpg"
+      ]
+    },
+    {
+      "identity": "n000149",
+      "task": "task4",
+      "image_paths": [
+        "data/val/n000149/0001_01.jpg",
+        "data/val/n000149/0002_01.jpg",
+        "data/val/n000149/0003_01.jpg",
+        "data/val/n000149/0004_01.jpg",
+        "data/val/n000149/0005_02.jpg",
+        "data/val/n000149/0006_01.jpg",
+        "data/val/n000149/0007_01.jpg",
+        "data/val/n000149/0008_01.jpg",
+        "data/val/n000149/0009_01.jpg",
+        "data/val/n000149/0010_01.jpg"
+      ]
+    }
+  ],
+  "constraints": {
+    "images_per_identity": 10
+  }
+}
+
