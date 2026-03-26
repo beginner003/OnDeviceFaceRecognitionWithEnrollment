@@ -20,7 +20,10 @@ from experiments.eval_utils import (
     print_summary_metrics,
 )
 from experiments.experiment_logging import setup_experiment_logging
-from src.system import FaceRecognitionSystem, SystemConfig
+from src.continual.naive_ft import NaiveFTConfig, NaiveFTStrategy
+from src.memory.herding import HerdingSelector
+from src.recognition.classifier_based import ClassifierRecognizer
+from src.system import FaceRecognitionSystem
 
 
 @dataclass(frozen=True)
@@ -126,6 +129,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             "use 0.0 for closed-set accuracy (always take argmax). Raise toward 1/K for stricter rejection."
         ),
     )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=10,
+        help="Number of SGD epochs for each incremental update (naive fine-tuning).",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=10,
+        help="SGD mini-batch size for each incremental update (naive fine-tuning).",
+    )
 
     args = parser.parse_args(list(argv) if argv is not None else None)
 
@@ -140,6 +155,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     loggers = setup_experiment_logging(log_dir=logs_dir, experiment_name="baseline_classifier")
     progress = loggers.progress
     metrics = loggers.metrics
+    metrics.info("========================================")
+    metrics.info("Run configuration")
+    metrics.info("  epochs: %d", int(args.epochs))
+    metrics.info("  batch_size: %d", int(args.batch_size))
+    metrics.info("  confidence_threshold: %.4f", float(args.confidence_threshold))
+    metrics.info("========================================")
 
     task_order, _, identity_order = _load_supertask(supertask_path)
     all_identities = list(identity_order)
@@ -167,14 +188,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
     _ensure_clean_workspace(workspace_dir, reset=bool(args.reset_workspace))
-    config = SystemConfig(
-        registration="naive",
-        exemplar_selection="herding",
-        recognition="classifier",
+    confidence_threshold = float(args.confidence_threshold)
+    system = FaceRecognitionSystem(
+        registration_strategy=NaiveFTStrategy(
+            config=NaiveFTConfig(
+                epochs=int(args.epochs),
+                batch_size=int(args.batch_size),
+            )
+        ),
+        exemplar_selector=HerdingSelector(),
+        recognition_strategy=ClassifierRecognizer(confidence_threshold=confidence_threshold),
+        workspace=workspace_dir,
         exemplar_k=5,
-        confidence_threshold=float(args.confidence_threshold),
+        confidence_threshold=confidence_threshold,
     )
-    system = FaceRecognitionSystem.from_config(config, workspace=workspace_dir)
+    system.load()
     if system.identities() and not args.reset_workspace:
         raise RuntimeError(
             f"Workspace {workspace_dir} already has registered identities: {system.identities()}. "

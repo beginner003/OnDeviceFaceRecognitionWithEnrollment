@@ -23,3 +23,8 @@ venv/
 # Logs (optional)
 *.log
 
+# Experiment artifacts
+experiments/**/logs/
+experiments/**/embeddings/
+experiments/**/workspace/
+
