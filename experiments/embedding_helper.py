@@ -17,6 +17,7 @@ LOG = logging.getLogger(__name__)
 
 _SelectMode = Literal["max_confidence", "all"]
 _OnFail = Literal["skip", "raise"]
+_Split = Literal["train", "test", "both"]
 
 
 def _repo_root() -> Path:
@@ -262,14 +263,18 @@ def embed_supertask_identities_to_root(
     base_dir: str | Path | None = None,
     task_filter: str | None = None,
     identities_filter: Iterable[str] | None = None,
+    split: _Split = "train",
     overwrite: bool = False,
 ) -> dict[str, np.ndarray]:
     """
     Convenience wrapper for `data/supertask_8_2.json`.
 
-    Creates per-identity subdirectories:
-        output_root/<identity>/embeddings.npy
-    and returns in-memory embeddings for all selected identities.
+    The current supertask schema provides `train_image_paths` and `test_image_paths`.
+    This helper creates per-identity subdirectories:
+
+    - `split="train"`: output_root/<identity>/train/embeddings.npy
+    - `split="test"`:  output_root/<identity>/test/embeddings.npy
+    - `split="both"`:  writes both, returns concatenated embeddings (train then test)
     """
 
     supertask_json_path = Path(supertask_json_path)
@@ -293,18 +298,35 @@ def embed_supertask_identities_to_root(
         if ids_set is not None and identity not in ids_set:
             continue
 
-        img_paths = entry.get("image_paths", [])
-        if not img_paths:
-            raise ValueError(f"Missing image_paths for identity {identity!r}")
+        safe_id_dir = output_root / _safe_filename(identity)
 
-        ident_dir = output_root / _safe_filename(identity)
-        emb = embed_images_to_dir(
-            image_paths=img_paths,
-            output_dir=ident_dir,
-            base_dir=base_dir,
-            overwrite=overwrite,
-        )
-        out[identity] = emb
+        train_paths = entry.get("train_image_paths", []) or []
+        test_paths = entry.get("test_image_paths", []) or []
+
+        if split in ("train", "both") and not train_paths:
+            raise ValueError(f"Missing train_image_paths for identity {identity!r}")
+        if split in ("test", "both") and not test_paths:
+            raise ValueError(f"Missing test_image_paths for identity {identity!r}")
+
+        parts: list[np.ndarray] = []
+        if split in ("train", "both"):
+            emb_train = embed_images_to_dir(
+                image_paths=train_paths,
+                output_dir=safe_id_dir / "train",
+                base_dir=base_dir,
+                overwrite=overwrite,
+            )
+            parts.append(emb_train)
+        if split in ("test", "both"):
+            emb_test = embed_images_to_dir(
+                image_paths=test_paths,
+                output_dir=safe_id_dir / "test",
+                base_dir=base_dir,
+                overwrite=overwrite,
+            )
+            parts.append(emb_test)
+
+        out[identity] = parts[0] if len(parts) == 1 else np.concatenate(parts, axis=0).astype(np.float32)
 
     return out
 

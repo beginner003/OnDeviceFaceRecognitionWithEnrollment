@@ -80,6 +80,8 @@ def incremental_train_naive(
     optimizer = SGD(classifier.parameters(), lr=cfg.lr, momentum=cfg.momentum)
     criterion = nn.CrossEntropyLoss()
 
+    # With a single output class, softmax cross-entropy is constant (loss 0) and
+    # gradients vanish — weights stay at expand() init. Learning starts once C >= 2.
     classifier.train()
     for _ in range(cfg.epochs):
         for xb, yb in loader:
