@@ -22,6 +22,7 @@ class ExemplarReplayConfig:
     momentum: float = 0.9
     epochs: int = 10
     batch_size: int = 32
+    exemplar_k: int = 30
 
 
 def incremental_train_replay(
@@ -60,9 +61,13 @@ def incremental_train_replay(
 
     # Replay: gather stored exemplars for all previously registered classes
     for cls_idx, ident in enumerate(store.identities()):
-        if ident == identity:
-            continue
         stored = store.get(ident).embeddings.astype(np.float32)
+        # sample from stored exemplars: n per class
+        max_exemplars = cfg.exemplar_k
+        if stored.shape[0] > max_exemplars:
+            idxs = np.random.choice(stored.shape[0], max_exemplars, replace=False)
+            stored = stored[idxs]
+        print(f"Replaying {stored.shape[0]} exemplars for identity '{ident}' (class {cls_idx})")
         all_x.append(stored)
         all_y.append(np.full(stored.shape[0], cls_idx, dtype=np.int64))
 
