@@ -14,7 +14,13 @@ from src.memory.exemplar_store import ExemplarStore
 
 @dataclass
 class ClassifierRecognizer:
-    """Use classifier softmax confidence for prediction."""
+    """
+    Argmax on cosine logits; optional rejection if max softmax < threshold.
+
+    For many-way softmax (large K), max probability is often modest (e.g. 0.1–0.3) even when
+    top-1 is correct — a threshold of 0.5 rejects almost everything. Use 0.0 for closed-set
+    evaluation (always return top-1), or set threshold near 1/K for open-set-style gating.
+    """
 
     confidence_threshold: float = 0.5
     device: str = "cpu"

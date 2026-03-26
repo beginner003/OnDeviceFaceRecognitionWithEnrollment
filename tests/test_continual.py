@@ -37,23 +37,41 @@ def test_cosine_linear_expand_init_aligns_with_mean_direction() -> None:
     assert cos > 0.999
 
 
-def test_incremental_train_naive_first_class_reduces_loss() -> None:
+def test_incremental_train_naive_first_identity_weights_match_expand_init() -> None:
+    """CE with C=1 is degenerate (loss 0, no grad); weights stay at mean-direction init."""
     rng = np.random.default_rng(1)
-    # Nearly identical vectors around one direction -> easy CE
-    base = rng.normal(size=(128,)).astype(np.float32)
-    base = base / (np.linalg.norm(base) + 1e-12)
-    noise = rng.normal(size=(8, 128)).astype(np.float32) * 0.05
-    emb = base + noise
+    emb = rng.normal(size=(8, 128)).astype(np.float32)
+    emb /= np.linalg.norm(emb, axis=1, keepdims=True)
 
     clf = CosineLinear(in_features=128, out_features=0)
     cfg = NaiveFTConfig(epochs=15, batch_size=8, lr=0.05, momentum=0.9)
     incremental_train_naive(clf, emb, config=cfg, device="cpu")
 
-    clf.eval()
-    with torch.no_grad():
-        logits = clf(torch.from_numpy(emb))
-        loss = torch.nn.functional.cross_entropy(logits, torch.zeros(8, dtype=torch.long))
-    assert loss.item() < 0.5
+    ref = CosineLinear(in_features=128, out_features=0)
+    ref.expand(1, init_from_embeddings=emb)
+    assert torch.allclose(clf.weight, ref.weight, atol=1e-5)
+
+
+def test_incremental_train_naive_second_identity_updates_weight_rows() -> None:
+    """With C>=2, CE produces non-zero loss and SGD moves classifier rows."""
+    rng = np.random.default_rng(4)
+    a = rng.normal(size=(8, 128)).astype(np.float32)
+    a /= np.linalg.norm(a, axis=1, keepdims=True)
+    b = rng.normal(size=(8, 128)).astype(np.float32)
+    b /= np.linalg.norm(b, axis=1, keepdims=True)
+
+    cfg = NaiveFTConfig(epochs=10, batch_size=8, lr=0.05, momentum=0.9)
+    clf = CosineLinear(in_features=128, out_features=0)
+    incremental_train_naive(clf, a, config=cfg, device="cpu")
+    w_row0_after_first = clf.weight[0].detach().clone()
+
+    incremental_train_naive(clf, b, config=cfg, device="cpu")
+    assert clf.out_features == 2
+    assert not torch.allclose(w_row0_after_first, clf.weight[0], atol=1e-5)
+
+    ref_b = CosineLinear(in_features=128, out_features=1)
+    ref_b.expand(1, init_from_embeddings=b)
+    assert not torch.allclose(ref_b.weight[0], clf.weight[1], atol=1e-5)
 
 
 def test_incremental_train_naive_second_step_has_two_classes() -> None:
