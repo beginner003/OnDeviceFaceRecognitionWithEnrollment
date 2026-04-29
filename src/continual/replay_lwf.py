@@ -1,28 +1,15 @@
-"""Replay + LwF strategy (high-level stub for orchestrator wiring)."""
+"""Compatibility aliases for the implemented no-replay LwF strategy."""
 
 from __future__ import annotations
 
-import numpy as np
+from src.continual.lwf import LwFConfig, LwFStrategy, incremental_train_lwf
 
-from src.continual.classifier import CosineLinear
-from src.memory.exemplar_store import ExemplarStore
+ReplayLwFConfig = LwFConfig
+ReplayLwFStrategy = LwFStrategy
+incremental_train_replay_lwf = incremental_train_lwf
 
-
-class ReplayLwFStrategy:
-    """
-    Strategy hook for replay plus distillation.
-
-    TODO: Implement replay + LwF training from IMPLEMENTATION_PLAN §6.3.
-    """
-
-    def update(
-        self,
-        classifier: CosineLinear,
-        store: ExemplarStore,
-        new_embeddings: np.ndarray,
-        identity: str,
-    ) -> CosineLinear:
-        _ = (classifier, store, new_embeddings, identity)
-        raise NotImplementedError(
-            "TODO(§6.3): ReplayLwFStrategy.update is not implemented yet."
-        )
+__all__ = [
+    "ReplayLwFConfig",
+    "ReplayLwFStrategy",
+    "incremental_train_replay_lwf",
+]
