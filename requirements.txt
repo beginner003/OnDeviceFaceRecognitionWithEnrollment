@@ -1,6 +1,10 @@
 numpy>=1.24.0
 opencv-python-headless>=4.8.0
-mediapipe>=0.10.0
+# Pin to 0.10.x — the Tasks FaceDetector model in src/models/ is built for this series.
+# If you upgrade beyond 0.10.x, re-download the model:
+#   curl -L -o src/models/blaze_face_full_range.tflite \
+#     "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_full_range/float16/latest/blaze_face_full_range.task"
+mediapipe>=0.10.14,<0.11.0
 psutil
 
 # PyTorch — on RPi / aarch64, PyPI resolves to CPU-only wheels automatically.
