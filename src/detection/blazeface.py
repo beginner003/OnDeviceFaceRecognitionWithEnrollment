@@ -164,10 +164,15 @@ class BlazeFaceDetector:
         # Linux aarch64 (Raspberry Pi) that produces an incorrect output tensor shape
         # for the BlazeFace SSD model, causing a TensorsToDetectionsCalculator crash.
         # Single-threaded execution routes through a non-affected XNNPACK path.
-        base_options = python_mod.BaseOptions(
-            model_asset_path=str(model_path),
-            cpu_num_threads=cpu_num_threads,
-        )
+        # BaseOptions did not accept cpu_num_threads before ~0.10.9; fall back
+        # gracefully so the code works across all 0.10.x sub-versions.
+        try:
+            base_options = python_mod.BaseOptions(
+                model_asset_path=str(model_path),
+                cpu_num_threads=cpu_num_threads,
+            )
+        except TypeError:
+            base_options = python_mod.BaseOptions(model_asset_path=str(model_path))
         options = vision_mod.FaceDetectorOptions(
             base_options=base_options,
             running_mode=vision_mod.RunningMode.IMAGE,
