@@ -1,12 +1,22 @@
-numpy
-opencv-python-headless
-mediapipe
+numpy>=1.24.0
+opencv-python-headless>=4.8.0
+mediapipe>=0.10.0
 psutil
-pyrealsense2
-torch
+
+# PyTorch — on RPi / aarch64, PyPI resolves to CPU-only wheels automatically.
+# For a CPU-only install on x86 Linux: pip install torch --index-url https://download.pytorch.org/whl/cpu
+torch>=2.0.0
+
+# Intel RealSense
+# RPi / aarch64: no PyPI wheel exists — install from source or via apt:
+#   sudo apt install ros-<distro>-librealsense2  OR  build from https://github.com/IntelRealSense/librealsense
+# The capture module falls back to an OpenCV webcam if pyrealsense2 is absent.
+pyrealsense2; platform_system == "Windows" or (platform_system == "Linux" and platform_machine == "x86_64")
+pyrealsense2-macosx; platform_system == "Darwin"
 
 # ---- TensorFlow Lite (MobileFaceNet embeddings) ----
-# Laptop (macOS): use full TensorFlow (provides `tf.lite.Interpreter`)
+# macOS: use full TensorFlow (provides tf.lite.Interpreter)
 tensorflow>=2.14.0; platform_system=="Darwin"
-# Raspberry Pi (ARM Linux): use the lightweight TFLite runtime instead of full TF
-tflite-runtime>=2.14.0; platform_system!="Darwin"
+# Linux / RPi: ai_edge_litert is Google's maintained TFLite runtime, successor to the
+# deprecated tflite-runtime. Exposes the same tflite_runtime.interpreter API.
+ai_edge_litert; platform_system!="Darwin"
