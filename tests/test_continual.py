@@ -1,6 +1,8 @@
-"""Unit tests for cosine classifier head, naive fine-tuning, and exemplar replay."""
+"""Unit tests for cosine classifier head, naive fine-tuning, exemplar replay, and LwF."""
 
 from __future__ import annotations
+
+import copy
 
 import numpy as np
 import pytest
@@ -9,6 +11,7 @@ torch = pytest.importorskip("torch")
 
 from src.continual.classifier import CosineLinear
 from src.continual.exemplar_replay import ExemplarReplayConfig, incremental_train_replay
+from src.continual.lwf import LwFConfig, incremental_train_lwf
 from src.continual.naive_ft import NaiveFTConfig, incremental_train_naive
 from src.memory.exemplar_store import ExemplarStore
 
@@ -174,3 +177,76 @@ def test_replay_retains_old_class_better_than_naive(tmp_path) -> None:
     assert replay_acc >= naive_acc, (
         f"Replay old-class acc ({replay_acc:.2f}) should be >= naive ({naive_acc:.2f})"
     )
+
+
+# ---------------------------------------------------------------------------
+# LwF tests
+# ---------------------------------------------------------------------------
+
+def test_lwf_first_class_output_shape() -> None:
+    rng = np.random.default_rng(40)
+    emb_a = _make_class_embeddings(rng, direction_seed=0)
+
+    clf = CosineLinear(in_features=128, out_features=0)
+    cfg = LwFConfig(epochs=5, batch_size=8, lr=0.03)
+    incremental_train_lwf(clf, emb_a, config=cfg, device="cpu")
+
+    assert clf.out_features == 1
+    logits = clf(torch.from_numpy(emb_a.astype(np.float32)))
+    assert logits.shape == (8, 1)
+
+
+def test_lwf_second_class_output_shape() -> None:
+    rng = np.random.default_rng(50)
+    emb_a = _make_class_embeddings(rng, direction_seed=0)
+    emb_b = _make_class_embeddings(rng, direction_seed=100)
+
+    clf = CosineLinear(in_features=128, out_features=0)
+    cfg = LwFConfig(epochs=5, batch_size=8, lr=0.03)
+    incremental_train_lwf(clf, emb_a, config=cfg, device="cpu")
+    incremental_train_lwf(clf, emb_b, config=cfg, device="cpu")
+
+    assert clf.out_features == 2
+    logits = clf(torch.from_numpy(emb_b.astype(np.float32)))
+    assert logits.shape == (8, 2)
+
+
+def test_lwf_distillation_changes_old_class_optimization() -> None:
+    rng = np.random.default_rng(60)
+    emb_a = _make_class_embeddings(rng, direction_seed=0, n=10)
+    emb_b = _make_class_embeddings(rng, direction_seed=100, n=10)
+    emb_c = _make_class_embeddings(rng, direction_seed=999, n=10)
+
+    base = CosineLinear(in_features=128, out_features=0)
+    warmup_cfg = LwFConfig(epochs=10, batch_size=10, lr=0.05, distill_weight=0.0)
+    incremental_train_lwf(base, emb_a, config=warmup_cfg, device="cpu")
+    incremental_train_lwf(base, emb_b, config=warmup_cfg, device="cpu")
+    assert base.out_features == 2
+
+    no_distill = copy.deepcopy(base)
+    with_distill = copy.deepcopy(base)
+
+    torch.manual_seed(0)
+    incremental_train_lwf(
+        no_distill,
+        emb_c,
+        config=LwFConfig(epochs=20, batch_size=10, lr=0.05, distill_weight=0.0),
+        device="cpu",
+    )
+    torch.manual_seed(0)
+    incremental_train_lwf(
+        with_distill,
+        emb_c,
+        config=LwFConfig(
+            epochs=20,
+            batch_size=10,
+            lr=0.05,
+            temperature=2.0,
+            distill_weight=10.0,
+        ),
+        device="cpu",
+    )
+
+    assert with_distill.out_features == 3
+    assert no_distill.out_features == 3
+    assert not torch.allclose(no_distill.weight[:2], with_distill.weight[:2], atol=1e-5)

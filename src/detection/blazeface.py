@@ -26,7 +26,7 @@ _PERF_ENV = "BLAZEFACE_LOG_PERFORMANCE"
 #   export BLAZEFACE_LOG_RAW=1
 _RAW_ENV = "BLAZEFACE_LOG_RAW"
 _DEFAULT_TASKS_MODEL = (
-    Path(__file__).resolve().parent.parent / "models" / "blaze_face_full_range.tflite"
+    Path(__file__).resolve().parent.parent / "models" / "blaze_face_short_range.tflite"
 )
 
 
@@ -104,10 +104,12 @@ class BlazeFaceDetector:
         log_raw_inference: Optional[bool] = None,
         tasks_model_path: Optional[str] = None,
         min_suppression_threshold: float = 0.5,
+        cpu_num_threads: int = 1,
     ) -> None:
         self.min_confidence = min_confidence
         self._backend = "tasks"
         self._tasks_detector = None
+        self._cpu_num_threads = cpu_num_threads
         if log_performance is None:
             log_performance = _env_flag_truthy(_PERF_ENV)
         self._log_performance = bool(log_performance)
@@ -146,6 +148,7 @@ class BlazeFaceDetector:
             model_path=model_path,
             min_detection_confidence=min_confidence,
             min_suppression_threshold=min_suppression_threshold,
+            cpu_num_threads=self._cpu_num_threads,
         )
 
     def _init_tasks_backend(
@@ -155,8 +158,21 @@ class BlazeFaceDetector:
         model_path: Path,
         min_detection_confidence: float,
         min_suppression_threshold: float,
+        cpu_num_threads: int = 1,
     ) -> None:
-        base_options = python_mod.BaseOptions(model_asset_path=str(model_path))
+        # cpu_num_threads=1 is a workaround for a MediaPipe XNNPACK regression on
+        # Linux aarch64 (Raspberry Pi) that produces an incorrect output tensor shape
+        # for the BlazeFace SSD model, causing a TensorsToDetectionsCalculator crash.
+        # Single-threaded execution routes through a non-affected XNNPACK path.
+        # BaseOptions did not accept cpu_num_threads before ~0.10.9; fall back
+        # gracefully so the code works across all 0.10.x sub-versions.
+        try:
+            base_options = python_mod.BaseOptions(
+                model_asset_path=str(model_path),
+                cpu_num_threads=cpu_num_threads,
+            )
+        except TypeError:
+            base_options = python_mod.BaseOptions(model_asset_path=str(model_path))
         options = vision_mod.FaceDetectorOptions(
             base_options=base_options,
             running_mode=vision_mod.RunningMode.IMAGE,
