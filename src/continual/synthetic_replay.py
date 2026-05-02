@@ -63,7 +63,8 @@ def incremental_train_synthetic_replay(
 
     all_x, all_y = [], []
 
-    # Synthetic replay: generate samples from stored Gaussians for old classes
+    # Synthetic replay: generate samples from stored Gaussians for old classes in
+    # the classifier's current class index order.
     for cls_idx, ident in enumerate(store.identities()):
         if ident == identity:
             continue
