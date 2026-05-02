@@ -26,7 +26,7 @@ _PERF_ENV = "BLAZEFACE_LOG_PERFORMANCE"
 #   export BLAZEFACE_LOG_RAW=1
 _RAW_ENV = "BLAZEFACE_LOG_RAW"
 _DEFAULT_TASKS_MODEL = (
-    Path(__file__).resolve().parent.parent / "models" / "blaze_face_full_range.tflite"
+    Path(__file__).resolve().parent.parent / "models" / "blaze_face_short_range.tflite"
 )
 
 

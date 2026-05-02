@@ -1,15 +1,6 @@
 numpy>=1.24.0
 opencv-python-headless>=4.8.0
-# Pin to 0.10.x — the Tasks FaceDetector model in src/models/ is built for this series.
-# If you upgrade beyond 0.10.x, re-download the model:
-#   curl -L -o src/models/blaze_face_full_range.tflite \
-#     "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_full_range/float16/latest/blaze_face_full_range.task"
-#
-# linux/aarch64 (Raspberry Pi): mediapipe 0.10.14 ships an XNNPACK build that produces
-# an incorrect output tensor shape for the BlazeFace SSD model on ARM, causing a
-# TensorsToDetectionsCalculator RET_CHECK crash. 0.10.3 predates the regression and
-# exposes the same Tasks FaceDetector Python API.
-mediapipe==0.10.5; platform_system == "Linux" and platform_machine == "aarch64"
+mediapipe==0.10.18; platform_system == "Linux" and platform_machine == "aarch64"
 mediapipe>=0.10.14,<0.11.0; platform_system != "Linux" or platform_machine != "aarch64"
 psutil
 
