@@ -49,9 +49,20 @@ Paths for `--supertask-json`, `--embeddings-root`, and `--workspace` may be abso
 
 ---
 
+## Synthetic replay classifier (`synthetic_replay_classifier`)
+
+Synthetic replay uses a Gaussian model fit to stored exemplar embeddings for replay during incremental updates. Artifacts default to `experiments/synthetic_replay_classifier/embeddings/` and `experiments/synthetic_replay_classifier/workspace/`.
+
+```bash
+python -m experiments.synthetic_replay_classifier.run
+```
+
+---
+
 ## Help
 
 ```bash
 PYTHONPATH=. python experiments/baseline_classifier/run.py --help
 PYTHONPATH=. python experiments/baseline_ncm/run.py --help
+
 ```
