@@ -15,6 +15,7 @@ from src.continual.classifier import CosineLinear
 from src.continual.exemplar_replay import ExemplarReplayStrategy
 from src.continual.naive_ft import NaiveFTStrategy
 from src.continual.replay_lwf import ReplayLwFStrategy
+from src.continual.synthetic_replay import SyntheticReplayStrategy
 from src.memory.exemplar_store import ExemplarStore
 from src.memory.herding import HerdingSelector
 from src.memory.random_selector import RandomSelector
@@ -27,7 +28,7 @@ from src.recognition.ncm import NCMRecognizer
 class SystemConfig:
     """Factory config for strategy and threshold selection."""
 
-    registration: str = "replay_lwf"  # "naive" | "replay" | "replay_lwf"
+    registration: str = "replay_lwf"  # "naive" | "replay" | "replay_lwf" | "synthetic_replay"
     exemplar_selection: str = "herding"  # "herding" | "random"
     recognition: str = "classifier"  # "ncm" | "classifier"
     exemplar_k: int = 50
@@ -225,6 +226,7 @@ class FaceRecognitionSystem:
             "naive": NaiveFTStrategy(),
             "replay": ExemplarReplayStrategy(),
             "replay_lwf": ReplayLwFStrategy(),
+            "synthetic_replay": SyntheticReplayStrategy(),
         }
         selector_map: Dict[str, ExemplarSelector] = {
             "herding": HerdingSelector(),

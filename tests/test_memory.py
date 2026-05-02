@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from src.memory.exemplar_store import ExemplarStore
+from src.memory.gaussian_store import GaussianStore
 from src.memory.herding import herding_select, select_exemplar_indices
 
 
@@ -84,3 +85,21 @@ def test_exemplar_store_load_all_only_loads_valid_identity_dirs(tmp_path: Path) 
     assert ids == ["alice"]
     assert reloaded.identities() == ["alice"]
 
+
+def test_gaussian_store_fit_and_sample_synthetic_embeddings() -> None:
+    rng = np.random.default_rng(0)
+    emb = rng.normal(size=(6, 128)).astype(np.float32)
+    store = GaussianStore()
+
+    store.fit_gaussian("alice", emb)
+    assert store.identities() == ["alice"]
+    assert store.total_bytes() > 0
+
+    samples = store.sample_synthetic("alice", 10)
+    assert samples.shape == (10, 128)
+    norms = np.linalg.norm(samples, axis=1)
+    assert np.allclose(norms, 1.0, atol=1e-6)
+
+    store.remove("alice")
+    assert store.identities() == []
+    assert store.total_bytes() == 0

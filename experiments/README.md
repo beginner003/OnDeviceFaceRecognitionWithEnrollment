@@ -49,9 +49,33 @@ Paths for `--supertask-json`, `--embeddings-root`, and `--workspace` may be abso
 
 ---
 
+## Synthetic replay (`synthetic_replay`)
+
+Synthetic replay uses a Gaussian model fit to stored exemplar embeddings for replay during incremental updates. Artifacts default to `experiments/synthetic_replay/embeddings/` and `experiments/synthetic_replay/workspace/`.
+
+```bash
+PYTHONPATH=. python experiments/synthetic_replay/run.py --reset-workspace
+```
+
+| Flag | Description |
+|------|-------------|
+| `--supertask-json PATH` | Supertask JSON (default: `data/supertask_8_2.json`). |
+| `--experiment-root PATH` | Root for embeddings + workspace (default: `experiments/synthetic_replay`). |
+| `--reset-workspace` | Delete the experiment workspace before running (recommended for a clean run). |
+| `--overwrite-embeddings` | Recompute embeddings even if cache exists. |
+| `--confidence-threshold FLOAT` | Recognition threshold (default: `0.1`). |
+| `--epochs INT` | SGD epochs per incremental update (default: `10`). |
+| `--batch-size INT` | SGD mini-batch size per incremental update (default: `10`). |
+| `--synthetic-samples-per-class INT` | Number of synthetic samples generated per old class (default: `50`). |
+| `--exemplar-k INT` | Number of exemplars stored per identity for Gaussian estimation (default: `5`). |
+
+---
+
 ## Help
 
 ```bash
 PYTHONPATH=. python experiments/baseline_classifier/run.py --help
 PYTHONPATH=. python experiments/baseline_ncm/run.py --help
+PYTHONPATH=. python experiments/synthetic_replay/run.py --help
+
 ```
