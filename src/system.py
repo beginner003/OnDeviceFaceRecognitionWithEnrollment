@@ -45,6 +45,7 @@ class RegistrationResult:
     total_identities: int
     elapsed_s: float
     exemplar_bytes: int
+    gaussian_bytes: int
 
 
 class FaceRecognitionSystem:
@@ -117,7 +118,9 @@ class FaceRecognitionSystem:
 
         selected, _indices = self.exemplar_selector.select(emb, self.exemplar_k)
         if isinstance(self.registration_strategy, SyntheticReplayStrategy):
-            self.gaussian_store.fit_gaussian(identity, selected)
+            # compute Gaussian params using all embeddings of the new class;
+            # the current synthetic replay implementation ignores exemplar_k when fitting the Gaussian.
+            self.gaussian_store.fit_gaussian(identity, emb)
             self.classifier = self.registration_strategy.update(
                 classifier=self.classifier,
                 store=self.store,
@@ -146,6 +149,7 @@ class FaceRecognitionSystem:
             total_identities=len(self._identity_to_class),
             elapsed_s=float(elapsed),
             exemplar_bytes=self.store.total_bytes(),
+            gaussian_bytes=self.gaussian_store.total_bytes(),
         )
         self._append_registration_log(result)
         return result
@@ -291,6 +295,7 @@ class FaceRecognitionSystem:
             "total_identities": result.total_identities,
             "elapsed_s": round(result.elapsed_s, 4),
             "exemplar_bytes": result.exemplar_bytes,
+            "gaussian_bytes": result.gaussian_bytes,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
         with log_path.open("a", encoding="utf-8") as f:
