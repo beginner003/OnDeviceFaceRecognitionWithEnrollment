@@ -17,7 +17,6 @@ import json
 import logging
 import math
 import shutil
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
@@ -91,6 +90,12 @@ def _identity_task_index_map(task_order: Sequence[TaskSpec]) -> Dict[str, int]:
     return out
 
 
+def _ensure_workspace(workspace: Path, *, reset: bool) -> None:
+    if reset and workspace.exists():
+        shutil.rmtree(workspace, ignore_errors=True)
+    workspace.mkdir(parents=True, exist_ok=True)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Synthetic replay continual FR experiment.")
     parser.add_argument(
@@ -104,6 +109,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=str,
         default=str(_repo_root() / "experiments" / "synthetic_replay_classifier"),
         help="Experiment directory root (default: experiments/synthetic_replay_classifier).",
+    )
+    parser.add_argument(
+        "--reset-workspace",
+        action="store_true",
+        help="Delete and recreate the experiment workspace before running.",
     )
     parser.add_argument(
         "--overwrite-embeddings",
@@ -148,7 +158,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     supertask_path = Path(args.supertask_json).expanduser().resolve()
     experiment_root = Path(args.experiment_root).expanduser().resolve()
     embeddings_root = experiment_root / "embeddings"
-    workspace_dir = Path(tempfile.mkdtemp(prefix="synthetic_replay_integration_"))
+    workspace_dir = experiment_root / "workspace"
+    _ensure_workspace(workspace_dir, reset=bool(args.reset_workspace))
     logs_dir = experiment_root / "logs"
 
     loggers = setup_experiment_logging(log_dir=logs_dir, experiment_name="synthetic_replay_classifier")
@@ -203,6 +214,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         confidence_threshold=confidence_threshold,
     )
     system.load()
+    if not args.reset_workspace and system.identities():
+        raise RuntimeError(
+            "Workspace already contains a saved system state. "
+            "Use --reset-workspace to start fresh or remove the workspace manually."
+        )
 
     train_embeddings: Dict[str, np.ndarray] = {
         ident: _load_embeddings(embeddings_root, ident, "train") for ident in all_identities
@@ -255,7 +271,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         progress.info("=" * 50)
 
     finally:
-        shutil.rmtree(workspace_dir, ignore_errors=True)
+        progress.info("Workspace retained at %s", workspace_dir)
 
     return 0
 

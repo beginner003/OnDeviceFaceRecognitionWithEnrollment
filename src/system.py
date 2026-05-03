@@ -17,6 +17,7 @@ from src.continual.naive_ft import NaiveFTStrategy
 from src.continual.replay_lwf import ReplayLwFStrategy
 from src.continual.synthetic_replay import SyntheticReplayStrategy
 from src.memory.exemplar_store import ExemplarStore
+from src.memory.gaussian_store import GaussianStore
 from src.memory.herding import HerdingSelector
 from src.memory.random_selector import RandomSelector
 from src.protocols import ExemplarSelector, RecognitionStrategy, RegistrationStrategy
@@ -77,13 +78,16 @@ class FaceRecognitionSystem:
 
         self.workspace = Path(workspace)
         self.exemplars_dir = self.workspace / "exemplars"
+        self.gaussians_dir = self.workspace / "gaussians"
         self.checkpoints_dir = self.workspace / "checkpoints"
         self.logs_dir = self.workspace / "logs"
         self.exemplars_dir.mkdir(parents=True, exist_ok=True)
+        self.gaussians_dir.mkdir(parents=True, exist_ok=True)
         self.checkpoints_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
 
         self.store = ExemplarStore(self.exemplars_dir)
+        self.gaussian_store = GaussianStore(self.gaussians_dir)
         self.classifier = CosineLinear(in_features=128, out_features=0)
         self._identity_to_class: Dict[str, int] = {}
 
@@ -112,15 +116,24 @@ class FaceRecognitionSystem:
             raise ValueError("embeddings must contain at least one vector")
 
         selected, _indices = self.exemplar_selector.select(emb, self.exemplar_k)
-        self.store.upsert_class(identity, selected)
-
-        # Strategy owns update policy (naive, replay, replay+lwf...).
-        self.classifier = self.registration_strategy.update(
-            classifier=self.classifier,
-            store=self.store,
-            new_embeddings=emb,
-            identity=identity,
-        )
+        if isinstance(self.registration_strategy, SyntheticReplayStrategy):
+            self.gaussian_store.fit_gaussian(identity, selected)
+            self.classifier = self.registration_strategy.update(
+                classifier=self.classifier,
+                store=self.store,
+                gaussian_store=self.gaussian_store,
+                new_embeddings=emb,
+                identity=identity,
+            )
+        else:
+            self.store.upsert_class(identity, selected)
+            self.classifier = self.registration_strategy.update(
+                classifier=self.classifier,
+                store=self.store,
+                gaussian_store=None,
+                new_embeddings=emb,
+                identity=identity,
+            )
 
         self._identity_to_class[identity] = self.classifier.out_features - 1
         self._sync_classifier_class_names()
@@ -161,6 +174,7 @@ class FaceRecognitionSystem:
             return
         remove_idx = self._identity_to_class[identity]
         self.store.remove_class(identity)
+        self.gaussian_store.remove(identity)
 
         old_weight = None if self.classifier.weight is None else self.classifier.weight.detach().clone()
         old_sigma = self.classifier.sigma.detach().clone()
@@ -178,8 +192,10 @@ class FaceRecognitionSystem:
         self.save()
 
     def save(self) -> None:
-        """Persist classifier, exemplar store, and class-index mapping."""
-        self.store.save_all()
+        """Persist classifier, exemplar store, Gaussian store, and class-index mapping."""
+        if not isinstance(self.registration_strategy, SyntheticReplayStrategy):
+            self.store.save_all()
+        self.gaussian_store.save_all()
         ckpt_path = self.checkpoints_dir / self._CLASSIFIER_CKPT
         state_path = self.workspace / self._STATE_JSON
 
@@ -195,9 +211,11 @@ class FaceRecognitionSystem:
         state_path.write_text(json.dumps(state_payload, indent=2), encoding="utf-8")
 
     def load(self) -> None:
-        """Restore classifier, exemplar store, and class-index mapping."""
+        """Restore classifier, exemplar store, Gaussian store, and class-index mapping."""
         self.store = ExemplarStore(self.exemplars_dir)
         self.store.load_all()
+        self.gaussian_store = GaussianStore(self.gaussians_dir)
+        self.gaussian_store.load_all()
 
         ckpt_path = self.checkpoints_dir / self._CLASSIFIER_CKPT
         state_path = self.workspace / self._STATE_JSON
@@ -258,6 +276,12 @@ class FaceRecognitionSystem:
     def _sync_classifier_class_names(self) -> None:
         class_names = self.identities()
         setattr(self.classifier, "_class_names", class_names)
+
+    def _rebuild_gaussian_store(self) -> None:
+        self.gaussian_store = GaussianStore(self.gaussians_dir)
+        for identity in self.store.identities():
+            emb = self.store.get(identity).embeddings.astype(np.float32)
+            self.gaussian_store.fit_gaussian(identity, emb)
 
     def _append_registration_log(self, result: RegistrationResult) -> None:
         log_path = self.logs_dir / "registration.log"

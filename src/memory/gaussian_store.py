@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List
 
 import numpy as np
@@ -23,7 +24,10 @@ class GaussianParams:
 class GaussianStore:
     """Store per-class Gaussian parameters instead of exemplars."""
 
-    def __init__(self) -> None:
+    def __init__(self, root_dir: str | Path | None = None) -> None:
+        self.root_dir = Path(root_dir) if root_dir is not None else None
+        if self.root_dir is not None:
+            self.root_dir.mkdir(parents=True, exist_ok=True)
         self.gaussians: Dict[str, GaussianParams] = {}
 
     def fit_gaussian(self, identity: str, embeddings: np.ndarray) -> None:
@@ -42,7 +46,7 @@ class GaussianStore:
             cov += np.eye(emb.shape[1], dtype=np.float32) * 1e-6
 
         self.gaussians[identity] = GaussianParams(
-            mean=mean,
+            mean=mean.astype(np.float32, copy=False),
             cov=cov.astype(np.float32, copy=False),
             n_samples=emb.shape[0],
         )
@@ -70,3 +74,74 @@ class GaussianStore:
     def remove(self, identity: str) -> None:
         """Remove Gaussian for identity."""
         self.gaussians.pop(identity, None)
+        if self.root_dir is not None:
+            class_dir = self.root_dir / identity
+            gaussian_path = class_dir / "gaussian.npz"
+            if gaussian_path.is_file():
+                gaussian_path.unlink()
+            if class_dir.is_dir():
+                try:
+                    class_dir.rmdir()
+                except OSError:
+                    pass
+
+    def save_class(self, identity: str) -> Path:
+        """Persist the Gaussian parameters for one identity."""
+        if self.root_dir is None:
+            raise ValueError("GaussianStore has no root_dir for persistence")
+        if identity not in self.gaussians:
+            raise KeyError(f"Identity not found: {identity}")
+
+        payload = self.gaussians[identity]
+        class_dir = self.root_dir / identity
+        class_dir.mkdir(parents=True, exist_ok=True)
+        out_path = class_dir / "gaussian.npz"
+        np.savez_compressed(
+            out_path,
+            mean=payload.mean.astype(np.float32, copy=False),
+            cov=payload.cov.astype(np.float32, copy=False),
+            n_samples=np.array(payload.n_samples, dtype=np.int64),
+        )
+        return out_path
+
+    def load_class(self, identity: str) -> GaussianParams:
+        """Load Gaussian parameters for one identity from disk."""
+        if self.root_dir is None:
+            raise ValueError("GaussianStore has no root_dir for persistence")
+
+        in_path = self.root_dir / identity / "gaussian.npz"
+        if not in_path.is_file():
+            raise FileNotFoundError(f"Missing Gaussian file: {in_path}")
+
+        with np.load(in_path, allow_pickle=False) as data:
+            mean = np.asarray(data["mean"], dtype=np.float32)
+            cov = np.asarray(data["cov"], dtype=np.float32)
+            n_samples = int(data["n_samples"].tolist())
+
+        if mean.ndim != 1:
+            raise ValueError(f"Invalid stored mean shape: {mean.shape}")
+        if cov.ndim != 2 or cov.shape[0] != cov.shape[1] or cov.shape[0] != mean.shape[0]:
+            raise ValueError(f"Invalid stored cov shape: {cov.shape}")
+
+        params = GaussianParams(mean=mean, cov=cov, n_samples=n_samples)
+        self.gaussians[identity] = params
+        return params
+
+    def save_all(self) -> List[Path]:
+        """Persist all stored Gaussian parameters."""
+        return [self.save_class(identity) for identity in self.identities()]
+
+    def load_all(self) -> List[str]:
+        """Load all Gaussian parameter files from disk."""
+        if self.root_dir is None:
+            raise ValueError("GaussianStore has no root_dir for persistence")
+
+        loaded: List[str] = []
+        for p in sorted(self.root_dir.iterdir()):
+            if not p.is_dir():
+                continue
+            gaussian_path = p / "gaussian.npz"
+            if gaussian_path.is_file():
+                self.load_class(p.name)
+                loaded.append(p.name)
+        return loaded

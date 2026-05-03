@@ -54,9 +54,6 @@ def incremental_train_synthetic_replay(
     if emb.shape[0] == 0:
         raise ValueError("new_embeddings must contain at least one vector")
 
-    # Fit Gaussian for the new identity
-    store.fit_gaussian(identity, emb)
-
     init_arg = emb if init_new_class_from_mean else None
     classifier.expand(1, init_from_embeddings=init_arg)
     new_class_idx = classifier.out_features - 1
@@ -111,15 +108,13 @@ class SyntheticReplayStrategy:
         self,
         classifier: CosineLinear,
         store: ExemplarStore,
+        gaussian_store: GaussianStore | None,
         new_embeddings: np.ndarray,
         identity: str,
     ) -> CosineLinear:
-        gaussian_store = GaussianStore()
-        for ident in store.identities():
-            if ident == identity:
-                continue
-            old_emb = store.get(ident).embeddings.astype(np.float32)
-            gaussian_store.fit_gaussian(ident, old_emb)
+        if gaussian_store is None:
+            raise ValueError("SyntheticReplayStrategy requires gaussian_store")
+        _ = store
 
         return incremental_train_synthetic_replay(
             classifier=classifier,

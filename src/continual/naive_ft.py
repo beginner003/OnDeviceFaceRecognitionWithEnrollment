@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from src.continual.classifier import CosineLinear
 from src.memory.exemplar_store import ExemplarStore
+from src.memory.gaussian_store import GaussianStore
 
 
 @dataclass
@@ -106,11 +107,12 @@ class NaiveFTStrategy:
         self,
         classifier: CosineLinear,
         store: ExemplarStore,
+        gaussian_store: GaussianStore | None,
         new_embeddings: np.ndarray,
         identity: str,
     ) -> CosineLinear:
-        # `store` and `identity` are kept in signature for protocol consistency.
-        _ = (store, identity)
+        # `store`, `gaussian_store`, and `identity` are kept in signature for protocol consistency.
+        _ = (store, gaussian_store, identity)
         return incremental_train_naive(
             classifier=classifier,
             new_embeddings=new_embeddings,

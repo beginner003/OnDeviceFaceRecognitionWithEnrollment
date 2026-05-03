@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from src.continual.classifier import CosineLinear
 from src.memory.exemplar_store import ExemplarStore
+from src.memory.gaussian_store import GaussianStore
 
 
 @dataclass
@@ -105,9 +106,11 @@ class ExemplarReplayStrategy:
         self,
         classifier: CosineLinear,
         store: ExemplarStore,
+        gaussian_store: GaussianStore | None,
         new_embeddings: np.ndarray,
         identity: str,
     ) -> CosineLinear:
+        _ = gaussian_store
         return incremental_train_replay(
             classifier=classifier,
             store=store,

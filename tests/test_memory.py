@@ -103,3 +103,24 @@ def test_gaussian_store_fit_and_sample_synthetic_embeddings() -> None:
     store.remove("alice")
     assert store.identities() == []
     assert store.total_bytes() == 0
+
+
+def test_gaussian_store_roundtrip_save_load(tmp_path: Path) -> None:
+    rng = np.random.default_rng(13)
+    emb = rng.normal(size=(8, 128)).astype(np.float32)
+    store = GaussianStore(tmp_path)
+
+    store.fit_gaussian("alice", emb)
+    saved = store.save_class("alice")
+    assert saved.is_file()
+
+    reloaded_store = GaussianStore(tmp_path)
+    ids = reloaded_store.load_all()
+    assert ids == ["alice"]
+    assert reloaded_store.identities() == ["alice"]
+
+    loaded = reloaded_store.load_class("alice")
+    assert loaded.mean.shape == (128,)
+    assert loaded.cov.shape == (128, 128)
+    assert loaded.n_samples == emb.shape[0]
+    assert reloaded_store.total_bytes() > 0
