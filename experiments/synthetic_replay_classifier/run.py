@@ -123,13 +123,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--confidence-threshold",
         type=float,
-        default=0.1,
+        default=0.5,
         help="Recognition threshold for classifier-based recognition.",
     )
     parser.add_argument(
         "--epochs",
         type=int,
-        default=10,
+        default=30,
         help="Number of SGD epochs for each incremental update.",
     )
     parser.add_argument(
@@ -141,7 +141,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--synthetic-samples-per-class",
         type=int,
-        default=5,
+        default=50,
         help="Number of synthetic replay samples generated per old class.",
     )
     # not used
