@@ -271,7 +271,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         progress.info("=" * 50)
 
     finally:
-        shutil.rmtree(workspace_dir, ignore_errors=True)
+        progress.info("Workspace retained at %s", workspace_dir)
 
     return 0
 

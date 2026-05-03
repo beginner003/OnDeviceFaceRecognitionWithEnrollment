@@ -116,20 +116,27 @@ class FaceRecognitionSystem:
             raise ValueError("embeddings must contain at least one vector")
 
         selected, _indices = self.exemplar_selector.select(emb, self.exemplar_k)
-        self.store.upsert_class(identity, selected)
-
-        # Strategy owns update policy (naive, replay, replay+lwf...).
-        self.classifier = self.registration_strategy.update(
-            classifier=self.classifier,
-            store=self.store,
-            new_embeddings=emb,
-            identity=identity,
-        )
+        if isinstance(self.registration_strategy, SyntheticReplayStrategy):
+            self.gaussian_store.fit_gaussian(identity, selected)
+            self.classifier = self.registration_strategy.update(
+                classifier=self.classifier,
+                store=self.store,
+                gaussian_store=self.gaussian_store,
+                new_embeddings=emb,
+                identity=identity,
+            )
+        else:
+            self.store.upsert_class(identity, selected)
+            self.classifier = self.registration_strategy.update(
+                classifier=self.classifier,
+                store=self.store,
+                gaussian_store=None,
+                new_embeddings=emb,
+                identity=identity,
+            )
 
         self._identity_to_class[identity] = self.classifier.out_features - 1
         self._sync_classifier_class_names()
-        if isinstance(self.registration_strategy, SyntheticReplayStrategy):
-            self._rebuild_gaussian_store()
         self.save()
 
         elapsed = time.perf_counter() - start_t
@@ -186,7 +193,8 @@ class FaceRecognitionSystem:
 
     def save(self) -> None:
         """Persist classifier, exemplar store, Gaussian store, and class-index mapping."""
-        self.store.save_all()
+        if not isinstance(self.registration_strategy, SyntheticReplayStrategy):
+            self.store.save_all()
         self.gaussian_store.save_all()
         ckpt_path = self.checkpoints_dir / self._CLASSIFIER_CKPT
         state_path = self.workspace / self._STATE_JSON

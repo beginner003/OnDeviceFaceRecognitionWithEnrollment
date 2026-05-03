@@ -8,6 +8,7 @@ import numpy as np
 
 from src.continual.classifier import CosineLinear
 from src.memory.exemplar_store import ExemplarStore
+from src.memory.gaussian_store import GaussianStore
 
 
 class RegistrationStrategy(Protocol):
@@ -17,6 +18,7 @@ class RegistrationStrategy(Protocol):
         self,
         classifier: CosineLinear,
         store: ExemplarStore,
+        gaussian_store: GaussianStore | None,
         new_embeddings: np.ndarray,
         identity: str,
     ) -> CosineLinear:

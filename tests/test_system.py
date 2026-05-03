@@ -77,9 +77,11 @@ def test_system_synthetic_replay_persists_gaussian_parameters(tmp_path: Path) ->
 
     system.register("alice", _cluster(c1, n=10, seed=1))
     assert (tmp_path / "gaussians" / "alice" / "gaussian.npz").is_file()
+    assert not any((tmp_path / "exemplars").rglob("*.npz"))
 
     system.register("bob", _cluster(c2, n=10, seed=2))
     assert (tmp_path / "gaussians" / "bob" / "gaussian.npz").is_file()
+    assert not any((tmp_path / "exemplars").rglob("*.npz"))
 
     loaded = FaceRecognitionSystem.from_config(cfg, workspace=tmp_path)
     assert loaded.gaussian_store.identities() == ["alice", "bob"]
