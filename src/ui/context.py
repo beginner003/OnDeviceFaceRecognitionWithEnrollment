@@ -95,7 +95,7 @@ def build_context() -> AppContext:
         height=height,
         fps=fps,
         use_depth=use_depth,
-        fallback_camera_index=int(os.environ.get("FACE_UI_FALLBACK_CAMERA", "0")),
+        fallback_camera_index=int(os.environ.get("FACE_UI_FALLBACK_CAMERA", "2")),
     )
     capture.start()
 
