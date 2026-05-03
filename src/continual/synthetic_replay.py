@@ -107,7 +107,7 @@ class SyntheticReplayStrategy:
     def update(
         self,
         classifier: CosineLinear,
-        store: ExemplarStore,
+        store: ExemplarStore,   # not used, just comply with the protocol
         gaussian_store: GaussianStore | None,
         new_embeddings: np.ndarray,
         identity: str,

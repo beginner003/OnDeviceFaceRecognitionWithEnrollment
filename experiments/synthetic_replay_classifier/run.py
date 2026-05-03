@@ -144,6 +144,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=5,
         help="Number of synthetic replay samples generated per old class.",
     )
+    # not used
     parser.add_argument(
         "--exemplar-k",
         type=int,
@@ -170,7 +171,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     metrics.info("  epochs: %d", int(args.epochs))
     metrics.info("  batch_size: %d", int(args.batch_size))
     metrics.info("  synthetic_samples_per_class: %d", int(args.synthetic_samples_per_class))
-    metrics.info("  exemplar_k: %d", int(args.exemplar_k))
+    metrics.info("  exemplar_k: %d, not used for synthetic replay", int(args.exemplar_k))
     metrics.info("  confidence_threshold: %.4f", float(args.confidence_threshold))
     metrics.info("========================================")
 
