@@ -1,0 +1,443 @@
+"""FastAPI application: MJPEG preview, recognition/register modes, enrollment API."""
+
+from __future__ import annotations
+
+import json
+import os
+import threading
+import time
+from pathlib import Path
+from typing import Generator, List, Optional
+
+import cv2
+import numpy as np
+import psutil
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+
+from src.ui.context import build_context, get_ctx, set_ctx
+
+from src.ui.registration_capture import (
+    collect_embeddings_for_pose,
+    quotas_three_way,
+    registration_phase_instruction,
+)
+
+
+_UI_DIR = Path(__file__).resolve().parent
+
+
+class RegisterBody(BaseModel):
+    name: str = Field(..., min_length=1, max_length=64)
+    n_frames: int = Field(
+        24,
+        ge=6,
+        le=120,
+        description="Split across frontal + turn-left + turn-right capture.",
+    )
+
+
+class SettingsBody(BaseModel):
+    registration: str = "replay_lwf"
+    exemplar_selection: str = "herding"
+    recognition: str = "classifier"
+    exemplar_k: int = 50
+    confidence_threshold: float = 0.5
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(title="Continual Face Recognition UI", version="0.1.0")
+
+    @app.on_event("startup")
+    def _startup() -> None:
+        set_ctx(build_context())
+
+    @app.on_event("shutdown")
+    def _shutdown() -> None:
+        try:
+            ctx = get_ctx()
+        except RuntimeError:
+            return
+        ctx.capture.stop()
+        ctx.detector.__exit__(None, None, None)
+        set_ctx(None)
+
+    app.mount(
+        "/static",
+        StaticFiles(directory=str(_UI_DIR / "static")),
+        name="static",
+    )
+
+    @app.get("/", response_class=HTMLResponse)
+    def index(request: Request) -> HTMLResponse:
+        from fastapi.templating import Jinja2Templates
+
+        templates = Jinja2Templates(directory=str(_UI_DIR / "templates"))
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context={},
+        )
+
+    @app.get("/video_feed")
+    def video_feed(mode: str = "recognition") -> StreamingResponse:
+        ctx = get_ctx()
+        if mode not in ("recognition", "register"):
+            mode = "recognition"
+
+        def frames() -> Generator[bytes, None, None]:
+            boundary = b"--frame\r\n"
+            period = 1.0 / max(1, min(30, int(15)))
+            while True:
+                t0 = time.perf_counter()
+                packet = ctx.capture.read()
+                if packet is None:
+                    time.sleep(0.05)
+                    continue
+                bgr = packet.bgr
+                detections = ctx.detector.detect(bgr)
+                labels: Optional[List[Optional[str]]] = None
+
+                rh = ""
+                active_pose = ""
+                busy = False
+                if mode == "register":
+                    with ctx.registration_state_lock:
+                        rh = str(ctx.registration_state.get("instruction", "")).strip()
+                        active_pose = str(ctx.registration_state.get("pose", "")).strip()
+                        busy = ctx.registration_state.get("phase") == "capturing"
+
+                if mode == "recognition" and detections:
+                    labels = []
+                    primary = ctx.pipeline.pick_largest(detections)
+                    for det in detections:
+                        text: Optional[str] = None
+                        if primary is not None and det is primary:
+                            try:
+                                emb = ctx.pipeline.embed_detection(bgr, det)
+                                with ctx.system_lock:
+                                    name, conf = ctx.system.recognize(emb)
+                                if conf >= ctx.system.confidence_threshold:
+                                    text = f"{name} ({conf:.2f})"
+                                else:
+                                    text = f"unknown ({conf:.2f})"
+                            except Exception:
+                                text = "?"
+                        labels.append(text)
+                elif mode == "register" and detections:
+                    labels = [None] * len(detections)
+                    prim = ctx.pipeline.pick_largest(detections)
+                    for i, det in enumerate(detections):
+                        if prim is not None and det is prim:
+                            labels[i] = "enrollment"
+
+                vis = ctx.pipeline.annotate_frame(bgr, detections, labels)
+
+                if mode == "register" and rh:
+                    line1 = rh[:75]
+                    cv2.putText(
+                        vis,
+                        line1,
+                        (8, 24),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.55,
+                        (48, 232, 144),
+                        2,
+                        cv2.LINE_AA,
+                    )
+                    if active_pose and busy:
+                        cv2.putText(
+                            vis,
+                            f"step: {active_pose}",
+                            (8, 46),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.5,
+                            (200, 220, 255),
+                            2,
+                            cv2.LINE_AA,
+                        )
+
+                src = ctx.capture.source
+
+                cv2.putText(
+                    vis,
+                    f"{mode} | cam:{src}",
+                    (8, vis.shape[0] - 12),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.45,
+                    (200, 200, 200),
+                    1,
+                    cv2.LINE_AA,
+                )
+
+                ok, jpeg = cv2.imencode(".jpg", vis, [int(cv2.IMWRITE_JPEG_QUALITY), 72])
+                if not ok:
+                    time.sleep(period)
+                    continue
+                yield boundary + b"Content-Type: image/jpeg\r\n\r\n" + jpeg.tobytes() + b"\r\n"
+
+                elapsed = time.perf_counter() - t0
+                time.sleep(max(0.0, period - elapsed))
+
+        return StreamingResponse(
+            frames(),
+            media_type="multipart/x-mixed-replace; boundary=frame",
+        )
+
+    @app.post("/register")
+    def register(body: RegisterBody) -> JSONResponse:
+        ctx = get_ctx()
+        with ctx.registration_lock:
+            if ctx.registration_busy:
+                raise HTTPException(status_code=409, detail="Registration already running")
+
+            identity = body.name.strip()
+            if not identity:
+                raise HTTPException(status_code=400, detail="Empty name")
+
+            with ctx.system_lock:
+                if identity in ctx.system.identities():
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Identity {identity!r} already enrolled",
+                    )
+
+            ctx.registration_busy = True
+            ctx.bump_registration(phase="queued", message="Starting capture…")
+
+        def worker() -> None:
+            time.sleep(0.15)
+            embedding_session: List[np.ndarray] = []
+            try:
+                try:
+                    qc, ql, qr = quotas_three_way(body.n_frames)
+                except ValueError as exc:
+                    ctx.bump_registration(phase="error", message=str(exc))
+                    return
+
+                total = body.n_frames
+                dup = float(os.environ.get("FACE_UI_REG_DEDUP_SIM", "0.995"))
+
+                def bump_cb(payload: dict) -> None:
+                    ctx.bump_registration(**payload)
+
+                ctx.bump_registration(
+                    phase="capturing",
+                    current=0,
+                    target=total,
+                    pose="center",
+                    instruction=registration_phase_instruction("center"),
+                    quota_phase_current=0,
+                    quota_phase_target=qc,
+                    message=registration_phase_instruction("center"),
+                )
+
+                per_phase_stale = int(
+                    os.environ.get(
+                        "FACE_UI_REG_STALE_PER_PHASE",
+                        str(max(400, body.n_frames * 80)),
+                    )
+                )
+
+                for pose, quota in (("center", qc), ("left", ql), ("right", qr)):
+                    baseline = len(embedding_session)
+                    bucket = collect_embeddings_for_pose(
+                        capture=ctx.capture,
+                        detector=ctx.detector,
+                        pipeline=ctx.pipeline,
+                        pose=pose,
+                        quota=quota,
+                        total_target=total,
+                        baseline_collected=baseline,
+                        similarity_dup=dup,
+                        stale_limit=per_phase_stale,
+                        bump=bump_cb,
+                    )
+                    if len(bucket) < quota:
+                        ctx.bump_registration(
+                            phase="error",
+                            message=(
+                                f"Incomplete pose '{pose}' ({len(bucket)}/{quota}). "
+                                "Improve lighting / distance, rotate more slowly, or tune env "
+                                "FACE_UI_REG_YAW_CENTER_MAX / FACE_UI_REG_YAW_LEFT / "
+                                "FACE_UI_REG_YAW_RIGHT."
+                            ),
+                            instruction="",
+                        )
+                        return
+                    embedding_session.extend(bucket)
+
+                emb_mat = np.stack(embedding_session, axis=0).astype(np.float32, copy=False)
+                embedding_session.clear()
+
+                ctx.bump_registration(
+                    phase="training",
+                    instruction="Saving to workspace…",
+                    message=(
+                        "Single registration update — replay methods persist exemplars and "
+                        "classifier checkpoints to disk."
+                    ),
+                    current=total,
+                    target=total,
+                )
+
+                try:
+                    with ctx.system_lock:
+                        result = ctx.system.register(identity, emb_mat)
+                finally:
+                    del emb_mat
+
+                ctx.bump_registration(
+                    phase="done",
+                    message="Done — resumed recognition; session vectors cleared from RAM.",
+                    identity=result.identity,
+                    selected_count=result.selected_count,
+                    total_identities=result.total_identities,
+                    elapsed_s=round(result.elapsed_s, 3),
+                    exemplar_bytes=result.exemplar_bytes,
+                    return_to_recognition=True,
+                    instruction="",
+                )
+            except ValueError as exc:
+                ctx.bump_registration(phase="error", message=str(exc), instruction="")
+            except Exception as exc:  # pragma: no cover
+                ctx.bump_registration(
+                    phase="error",
+                    message=f"{type(exc).__name__}: {exc}",
+                    instruction="",
+                )
+            finally:
+                embedding_session.clear()
+                ctx.registration_busy = False
+
+        threading.Thread(target=worker, daemon=True).start()
+        return JSONResponse({"ok": True})
+
+    @app.get("/register/stream")
+    def register_stream() -> StreamingResponse:
+        ctx = get_ctx()
+
+        def gen() -> Generator[str, None, None]:
+            last_seq = -1
+            while True:
+                with ctx.registration_state_lock:
+                    seq = int(ctx.registration_state.get("seq", 0))
+                    payload = dict(ctx.registration_state)
+                if seq > last_seq:
+                    last_seq = seq
+                    yield f"data: {json.dumps(payload)}\n\n"
+                    if payload.get("phase") in ("done", "error"):
+                        break
+                else:
+                    yield ":\n\n"
+                time.sleep(0.12)
+
+        return StreamingResponse(gen(), media_type="text/event-stream")
+
+    @app.get("/identities")
+    def identities() -> JSONResponse:
+        ctx = get_ctx()
+        with ctx.system_lock:
+            names = ctx.system.identities()
+            items = []
+            store_ids = set(ctx.system.store.identities())
+            for n in names:
+                ec: Optional[int] = None
+                if n in store_ids:
+                    ec = int(ctx.system.store.get(n).embeddings.shape[0])
+                items.append({"name": n, "exemplar_count": ec})
+        return JSONResponse({"items": items})
+
+    @app.delete("/identities/{name}")
+    def delete_identity(name: str) -> JSONResponse:
+        ctx = get_ctx()
+        with ctx.system_lock:
+            before = set(ctx.system.identities())
+            ctx.system.remove_identity(name)
+            after = set(ctx.system.identities())
+        if name not in before:
+            raise HTTPException(status_code=404, detail="Identity not found")
+        return JSONResponse({"ok": True, "removed": name, "remaining": sorted(after)})
+
+    @app.get("/status")
+    def status() -> JSONResponse:
+        ctx = get_ctx()
+        proc = psutil.Process()
+        rss_mb = proc.memory_info().rss / (1024 * 1024)
+        with ctx.system_lock:
+            n_id = len(ctx.system.identities())
+            prefs_locked = ctx.settings_locked()
+        return JSONResponse(
+            {
+                "workspace": str(ctx.workspace),
+                "camera_source": ctx.capture.source,
+                "enrolled_count": n_id,
+                "registration_busy": ctx.registration_busy,
+                "settings_locked": prefs_locked,
+                "memory_rss_mb": round(float(rss_mb), 1),
+            }
+        )
+
+    @app.get("/settings")
+    def get_settings() -> JSONResponse:
+        from src.ui.preferences import load_preferences
+
+        ctx = get_ctx()
+        prefs = load_preferences(ctx.workspace)
+        return JSONResponse(
+            {
+                **prefs.to_json_dict(),
+                "locked": ctx.settings_locked(),
+            }
+        )
+
+    @app.put("/settings")
+    def put_settings(body: SettingsBody) -> JSONResponse:
+        from src.ui.preferences import UiPreferences, validate_preferences_dict
+
+        ctx = get_ctx()
+        if ctx.settings_locked():
+            raise HTTPException(
+                status_code=409,
+                detail="Settings are locked after the first enrollment; remove all identities to change methods.",
+            )
+        try:
+            prefs = validate_preferences_dict(body.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        with ctx.system_lock:
+            ctx.reload_system(prefs)
+        return JSONResponse({"ok": True, **prefs.to_json_dict()})
+
+    @app.post("/evaluate")
+    def evaluate() -> JSONResponse:
+        return JSONResponse(
+            {
+                "ok": False,
+                "message": "Offline benchmarks live under experiments/. "
+                "Use /status and /identities for on-device enrollment stats.",
+            }
+        )
+
+    return app
+
+
+app = create_app()
+
+
+def main() -> None:
+    import uvicorn
+
+    uvicorn.run(
+        "src.ui.app:app",
+        host=os.environ.get("FACE_UI_HOST", "0.0.0.0"),
+        port=int(os.environ.get("FACE_UI_PORT", "8000")),
+        reload=False,
+    )
+
+
+if __name__ == "__main__":
+    main()
