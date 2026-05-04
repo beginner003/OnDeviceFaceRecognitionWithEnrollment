@@ -19,6 +19,7 @@ from experiments.eval_utils import (
     print_summary_metrics,
 )
 from experiments.experiment_logging import setup_experiment_logging
+from experiments.memory_metrics import peak_delta_mb, snapshot_peak_memory
 from src.system import FaceRecognitionSystem, SystemConfig
 
 
@@ -91,6 +92,7 @@ def main() -> None:
     loggers = setup_experiment_logging(log_dir=logs_dir, experiment_name="baseline_ncm")
     progress = loggers.progress
     metrics = loggers.metrics
+    mem_run_start = snapshot_peak_memory()
 
     if args.reset_workspace and workspace.exists():
         shutil.rmtree(workspace)
@@ -118,6 +120,12 @@ def main() -> None:
             identities_filter=[ident],
             overwrite=bool(args.overwrite_embeddings),
         )
+    mem_after_embedding = snapshot_peak_memory()
+    metrics.info(
+        "Peak memory after embedding: %.2f MB (delta +%.2f MB)",
+        mem_after_embedding.peak_rss_mb,
+        peak_delta_mb(mem_run_start, mem_after_embedding),
+    )
 
     train_embeddings = embed_supertask_identities_to_root(
         supertask_json_path=supertask_json,
@@ -145,6 +153,7 @@ def main() -> None:
     final_predictions = None
 
     for task_name in task_order:
+        mem_task_before = snapshot_peak_memory()
         for identity in tasks.get(task_name, []):
             progress.info("Registering person %s", identity)
             emb = np.asarray(train_embeddings[identity], dtype=np.float32)
@@ -159,6 +168,13 @@ def main() -> None:
         )
         final_predictions = predictions
         per_task_results.append(per_class_acc)
+        mem_task_after = snapshot_peak_memory()
+        metrics.info(
+            "Peak memory after %s: %.2f MB (delta +%.2f MB)",
+            task_name,
+            mem_task_after.peak_rss_mb,
+            peak_delta_mb(mem_task_before, mem_task_after),
+        )
 
     A, identity_names = compute_accuracy_matrix(per_task_results, task_order, identity_task_map)
     print_per_task_table(A, task_names=task_order, identity_names=identity_names, logger=metrics)
@@ -175,6 +191,13 @@ def main() -> None:
             registered_identities=identity_names,
             logger=metrics,
         )
+
+    mem_run_end = snapshot_peak_memory()
+    metrics.info(
+        "Overall peak memory: %.2f MB (run delta +%.2f MB)",
+        mem_run_end.peak_rss_mb,
+        peak_delta_mb(mem_run_start, mem_run_end),
+    )
 
 if __name__ == "__main__":
     main()

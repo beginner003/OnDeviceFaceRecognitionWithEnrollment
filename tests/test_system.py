@@ -5,8 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-import pytest
-
 from src.system import FaceRecognitionSystem, SystemConfig
 
 
@@ -88,10 +86,10 @@ def test_system_synthetic_replay_persists_gaussian_parameters(tmp_path: Path) ->
     loaded_params = loaded.gaussian_store.load_class("alice")
     assert loaded_params.mean.shape == (128,)
     assert loaded_params.cov.shape == (128, 128)
-    assert loaded_params.n_samples == 6
+    assert loaded_params.n_samples == 10
 
 
-def test_system_replay_stub_raises_clear_todo(tmp_path: Path) -> None:
+def test_system_replay_registers_and_persists_exemplars(tmp_path: Path) -> None:
     cfg = SystemConfig(
         registration="replay",
         exemplar_selection="herding",
@@ -100,5 +98,10 @@ def test_system_replay_stub_raises_clear_todo(tmp_path: Path) -> None:
     )
     system = FaceRecognitionSystem.from_config(cfg, workspace=tmp_path)
     emb = _cluster(np.ones((128,), dtype=np.float32), n=6, seed=20)
-    with pytest.raises(NotImplementedError, match="TODO\\(§6.2\\)"):
-        system.register("alice", emb)
+    result = system.register("alice", emb)
+    assert result.identity == "alice"
+    assert result.selected_count == 5
+    assert (tmp_path / "exemplars" / "alice" / "exemplars.npz").is_file()
+
+    loaded = FaceRecognitionSystem.from_config(cfg, workspace=tmp_path)
+    assert loaded.identities() == ["alice"]

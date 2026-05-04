@@ -20,6 +20,7 @@ from experiments.eval_utils import (
     print_summary_metrics,
 )
 from experiments.experiment_logging import setup_experiment_logging
+from experiments.memory_metrics import peak_delta_mb, snapshot_peak_memory
 from src.continual.naive_ft import NaiveFTConfig, NaiveFTStrategy
 from src.memory.herding import HerdingSelector
 from src.recognition.classifier_based import ClassifierRecognizer
@@ -155,6 +156,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     loggers = setup_experiment_logging(log_dir=logs_dir, experiment_name="baseline_classifier")
     progress = loggers.progress
     metrics = loggers.metrics
+    mem_run_start = snapshot_peak_memory()
     metrics.info("========================================")
     metrics.info("Run configuration")
     metrics.info("  epochs: %d", int(args.epochs))
@@ -186,6 +188,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             identities_filter=[ident],
             overwrite=bool(args.overwrite_embeddings),
         )
+    mem_after_embedding = snapshot_peak_memory()
+    metrics.info(
+        "Peak memory after embedding: %.2f MB (delta +%.2f MB)",
+        mem_after_embedding.peak_rss_mb,
+        peak_delta_mb(mem_run_start, mem_after_embedding),
+    )
 
     _ensure_clean_workspace(workspace_dir, reset=bool(args.reset_workspace))
     confidence_threshold = float(args.confidence_threshold)
@@ -221,6 +229,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     registered: List[str] = []
     for task in task_order:
+        mem_task_before = snapshot_peak_memory()
         for ident in task.identities:
             progress.info("Registering person %s", ident)
             system.register(ident, train_embeddings[ident])
@@ -234,6 +243,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         per_task_results.append(per_class_acc)
         final_predictions = preds
+        mem_task_after = snapshot_peak_memory()
+        metrics.info(
+            "Peak memory after %s: %.2f MB (delta +%.2f MB)",
+            task.name,
+            mem_task_after.peak_rss_mb,
+            peak_delta_mb(mem_task_before, mem_task_after),
+        )
 
     A, identity_names = compute_accuracy_matrix(per_task_results, task_column_names, id_to_task_idx)
     print_per_task_table(A, task_column_names, identity_names, logger=metrics)
@@ -250,6 +266,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             registered_identities=identity_names,
             logger=metrics,
         )
+
+    mem_run_end = snapshot_peak_memory()
+    metrics.info(
+        "Overall peak memory: %.2f MB (run delta +%.2f MB)",
+        mem_run_end.peak_rss_mb,
+        peak_delta_mb(mem_run_start, mem_run_end),
+    )
 
     return 0
 

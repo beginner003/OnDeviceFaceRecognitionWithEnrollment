@@ -45,11 +45,25 @@ class AppContext:
         default_factory=lambda: {"phase": "idle", "seq": 0}
     )
     registration_state_lock: threading.Lock = field(default_factory=threading.Lock)
+    pipeline_state: dict[str, Any] = field(default_factory=lambda: {"stage": "idle"})
+    pipeline_aligned_bgr: Any = None
+    pipeline_state_lock: threading.Lock = field(default_factory=threading.Lock)
 
     def bump_registration(self, **kwargs: Any) -> None:
         with self.registration_state_lock:
             self.registration_state.update(kwargs)
             self.registration_state["seq"] = int(self.registration_state.get("seq", 0)) + 1
+
+    def update_pipeline_state(self, payload: dict[str, Any], aligned_bgr: Any = None) -> None:
+        with self.pipeline_state_lock:
+            self.pipeline_state = dict(payload)
+            if aligned_bgr is not None:
+                self.pipeline_aligned_bgr = aligned_bgr
+
+    def read_pipeline_state(self) -> tuple[dict[str, Any], Any]:
+        with self.pipeline_state_lock:
+            aligned = None if self.pipeline_aligned_bgr is None else self.pipeline_aligned_bgr.copy()
+            return dict(self.pipeline_state), aligned
 
     def settings_locked(self) -> bool:
         return len(self.system.identities()) > 0

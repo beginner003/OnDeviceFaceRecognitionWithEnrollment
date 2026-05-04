@@ -13,6 +13,7 @@
   const regMsg = document.getElementById("regMsg");
   const identityList = document.getElementById("identityList");
   const btnRefreshIds = document.getElementById("btnRefreshIds");
+  const alignedFace = document.getElementById("alignedFace");
 
   let mode = "recognition";
 
@@ -38,6 +39,54 @@
       statusPill.textContent = `${j.enrolled_count} enrolled · ${j.camera_source}${busy} · ${j.memory_rss_mb} MB RSS`;
     } catch {
       statusPill.textContent = "status unavailable";
+    }
+  }
+
+  function setStage(id, ok, detail) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.toggle("ok", Boolean(ok));
+    el.classList.toggle("warn", !ok);
+    const span = el.querySelector("span");
+    if (span) span.textContent = detail || (ok ? "ok" : "waiting");
+  }
+
+  async function pollPipeline() {
+    try {
+      const r = await fetch(`/pipeline/status?t=${Date.now()}`);
+      const j = await r.json();
+      const dets = j.detections || [];
+      const primary = dets.find((d) => d.primary) || dets[0];
+      const timings = j.pipeline_timings_ms || {};
+      const rec = j.recognition;
+
+      setStage("stageCapture", Boolean(j.camera_source), j.camera_source || "waiting");
+      setStage("stageDetect", dets.length > 0, `${j.num_faces || 0} face(s) · ${j.detection_ms || 0}ms`);
+      setStage("stageAlign", Boolean(timings.align), timings.align ? `${timings.align}ms` : "waiting");
+      setStage("stageEmbed", Boolean(timings.embed), timings.embed ? `${timings.embed}ms` : "waiting");
+      setStage(
+        "stageRecognize",
+        Boolean(rec && rec.name),
+        rec && rec.name ? `${rec.name} ${Number(rec.confidence || 0).toFixed(2)}` : "waiting",
+      );
+
+      document.getElementById("pipeCamera").textContent = j.camera_source || "-";
+      document.getElementById("pipeFaces").textContent = String(j.num_faces ?? "-");
+      document.getElementById("pipeBbox").textContent = primary ? primary.bbox_xywh.join(", ") : "-";
+      document.getElementById("pipeConf").textContent = primary ? Number(primary.confidence).toFixed(3) : "-";
+      document.getElementById("pipeRec").textContent = rec
+        ? `${rec.accepted ? "accepted" : "rejected"} · ${rec.name} · ${Number(rec.confidence).toFixed(3)}`
+        : mode === "register"
+          ? "enrollment preview"
+          : "-";
+      document.getElementById("pipeTimings").textContent =
+        `detect ${j.detection_ms || 0}ms · align ${timings.align || 0}ms · embed ${timings.embed || 0}ms`;
+      document.getElementById("pipeError").textContent = j.error || "";
+      if (alignedFace && dets.length > 0) {
+        alignedFace.src = `/pipeline/aligned_face.jpg?t=${Date.now()}`;
+      }
+    } catch (e) {
+      setStage("stageCapture", false, "offline");
     }
   }
 
@@ -212,7 +261,9 @@
 
   setMode("recognition");
   pollStatus();
+  pollPipeline();
   loadSettings();
   refreshIdentities();
   setInterval(pollStatus, 4000);
+  setInterval(pollPipeline, 900);
 })();

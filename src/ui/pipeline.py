@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
@@ -11,6 +13,15 @@ import numpy as np
 from src.alignment import FaceAligner
 from src.detection.blazeface import Detection
 from src.embedding import MobileFaceNetEmbedder
+
+
+@dataclass(frozen=True)
+class PipelineArtifact:
+    """Intermediate result for one detected face in a live demo frame."""
+
+    embedding: np.ndarray
+    aligned_bgr: np.ndarray
+    timings_ms: dict[str, float]
 
 
 def _repo_root() -> Path:
@@ -83,15 +94,44 @@ class VisionPipeline:
     def embed_detection(self, bgr: np.ndarray, det: Detection) -> np.ndarray:
         """Return L2-normalised (128,) float32 embedding."""
 
+        return self.inspect_detection(bgr, det).embedding
+
+    def inspect_detection(self, bgr: np.ndarray, det: Detection) -> PipelineArtifact:
+        """Return embedding plus aligned crop and stage timings for UI display."""
+
+        t0 = time.perf_counter()
         aligned = self.aligner.align(
             bgr_image=bgr,
             landmarks_6pt=det.landmarks_6pt,
             bbox_xywh=det.bbox,
         )
+        t1 = time.perf_counter()
         tensor = FaceAligner.to_model_input(aligned.aligned_bgr)
         batch = np.stack([tensor], axis=0).astype(np.float32)
         out = self.embedder.embed_batch(batch)
-        return out[0].astype(np.float32, copy=False)
+        t2 = time.perf_counter()
+        return PipelineArtifact(
+            embedding=out[0].astype(np.float32, copy=False),
+            aligned_bgr=aligned.aligned_bgr,
+            timings_ms={
+                "align": round((t1 - t0) * 1000.0, 2),
+                "embed": round((t2 - t1) * 1000.0, 2),
+            },
+        )
+
+    @staticmethod
+    def detection_to_dict(det: Detection, *, index: int, primary: bool = False) -> dict:
+        x, y, w, h = [int(v) for v in det.bbox]
+        landmarks = np.asarray(det.landmarks_6pt, dtype=np.float32)
+        return {
+            "index": int(index),
+            "primary": bool(primary),
+            "confidence": round(float(det.confidence), 4),
+            "bbox_xywh": [x, y, w, h],
+            "landmarks_6pt": [
+                [round(float(pt[0]), 2), round(float(pt[1]), 2)] for pt in landmarks
+            ],
+        }
 
     @staticmethod
     def annotate_frame(
@@ -108,9 +148,13 @@ class VisionPipeline:
             x, y, w, h = det.bbox
             color = (72, 189, 255)
             cv2.rectangle(out, (x, y), (x + w, y + h), color, 2)
+            for pt in np.asarray(det.landmarks_6pt, dtype=np.int32):
+                cv2.circle(out, (int(pt[0]), int(pt[1])), 2, (48, 232, 144), -1)
             label = None
             if labels is not None and i < len(labels):
                 label = labels[i]
+            if not label:
+                label = f"face {i + 1} {float(det.confidence):.2f}"
             if label:
                 cv2.putText(
                     out,

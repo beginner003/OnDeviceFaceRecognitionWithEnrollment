@@ -27,6 +27,31 @@
       <div class="video-wrap">
         <img id="feed" alt="camera feed" src="/video_feed?mode=recognition" />
       </div>
+      <div class="pipeline-strip">
+        <div class="stage-card" id="stageCapture">Capture<br><span>waiting</span></div>
+        <div class="stage-card" id="stageDetect">Detection<br><span>waiting</span></div>
+        <div class="stage-card" id="stageAlign">Alignment<br><span>waiting</span></div>
+        <div class="stage-card" id="stageEmbed">Embedding<br><span>waiting</span></div>
+        <div class="stage-card" id="stageRecognize">Recognition<br><span>waiting</span></div>
+      </div>
+      <div class="debug-panel">
+        <div>
+          <h2>Aligned face crop</h2>
+          <img id="alignedFace" class="aligned-face" alt="aligned face crop" src="/pipeline/aligned_face.jpg" />
+        </div>
+        <div>
+          <h2>Live pipeline details</h2>
+          <dl class="pipeline-meta">
+            <div><dt>Camera</dt><dd id="pipeCamera">-</dd></div>
+            <div><dt>Faces</dt><dd id="pipeFaces">-</dd></div>
+            <div><dt>Primary bbox</dt><dd id="pipeBbox">-</dd></div>
+            <div><dt>Detector confidence</dt><dd id="pipeConf">-</dd></div>
+            <div><dt>Recognition</dt><dd id="pipeRec">-</dd></div>
+            <div><dt>Timings</dt><dd id="pipeTimings">-</dd></div>
+          </dl>
+          <p class="fineprint" id="pipeError"></p>
+        </div>
+      </div>
     </section>
 
     <aside class="sidebar">

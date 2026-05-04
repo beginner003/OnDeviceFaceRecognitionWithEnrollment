@@ -97,8 +97,14 @@ def create_app() -> FastAPI:
                     time.sleep(0.05)
                     continue
                 bgr = packet.bgr
+                detect_t0 = time.perf_counter()
                 detections = ctx.detector.detect(bgr)
+                detect_ms = round((time.perf_counter() - detect_t0) * 1000.0, 2)
                 labels: Optional[List[Optional[str]]] = None
+                primary = ctx.pipeline.pick_largest(detections)
+                artifact = None
+                recognition_payload = None
+                pipeline_error = ""
 
                 rh = ""
                 active_pose = ""
@@ -111,29 +117,62 @@ def create_app() -> FastAPI:
 
                 if mode == "recognition" and detections:
                     labels = []
-                    primary = ctx.pipeline.pick_largest(detections)
                     for det in detections:
                         text: Optional[str] = None
                         if primary is not None and det is primary:
                             try:
-                                emb = ctx.pipeline.embed_detection(bgr, det)
+                                artifact = ctx.pipeline.inspect_detection(bgr, det)
                                 with ctx.system_lock:
-                                    name, conf = ctx.system.recognize(emb)
+                                    name, conf = ctx.system.recognize(artifact.embedding)
                                 if conf >= ctx.system.confidence_threshold:
                                     text = f"{name} ({conf:.2f})"
                                 else:
                                     text = f"unknown ({conf:.2f})"
+                                recognition_payload = {
+                                    "name": str(name),
+                                    "confidence": round(float(conf), 4),
+                                    "accepted": bool(conf >= ctx.system.confidence_threshold),
+                                }
                             except Exception:
                                 text = "?"
+                                pipeline_error = "recognition failed"
                         labels.append(text)
                 elif mode == "register" and detections:
                     labels = [None] * len(detections)
-                    prim = ctx.pipeline.pick_largest(detections)
                     for i, det in enumerate(detections):
-                        if prim is not None and det is prim:
+                        if primary is not None and det is primary:
                             labels[i] = "enrollment"
+                    if primary is not None:
+                        try:
+                            artifact = ctx.pipeline.inspect_detection(bgr, primary)
+                        except Exception:
+                            pipeline_error = "alignment/embedding preview failed"
 
                 vis = ctx.pipeline.annotate_frame(bgr, detections, labels)
+                pipeline_payload = {
+                    "stage": "frame_processed",
+                    "mode": mode,
+                    "camera_source": ctx.capture.source,
+                    "timestamp": packet.timestamp,
+                    "frame_size": [int(bgr.shape[1]), int(bgr.shape[0])],
+                    "detection_ms": detect_ms,
+                    "num_faces": len(detections),
+                    "detections": [
+                        ctx.pipeline.detection_to_dict(
+                            det,
+                            index=i,
+                            primary=bool(primary is not None and det is primary),
+                        )
+                        for i, det in enumerate(detections)
+                    ],
+                    "pipeline_timings_ms": artifact.timings_ms if artifact is not None else {},
+                    "recognition": recognition_payload,
+                    "error": pipeline_error,
+                }
+                ctx.update_pipeline_state(
+                    pipeline_payload,
+                    aligned_bgr=artifact.aligned_bgr if artifact is not None else None,
+                )
 
                 if mode == "register" and rh:
                     line1 = rh[:75]
@@ -349,6 +388,37 @@ def create_app() -> FastAPI:
                     ec = int(ctx.system.store.get(n).embeddings.shape[0])
                 items.append({"name": n, "exemplar_count": ec})
         return JSONResponse({"items": items})
+
+    @app.get("/pipeline/status")
+    def pipeline_status() -> JSONResponse:
+        ctx = get_ctx()
+        payload, _aligned = ctx.read_pipeline_state()
+        return JSONResponse(payload)
+
+    @app.get("/pipeline/aligned_face.jpg")
+    def aligned_face() -> StreamingResponse:
+        ctx = get_ctx()
+        _payload, aligned = ctx.read_pipeline_state()
+        if aligned is None:
+            canvas = np.zeros((112, 112, 3), dtype=np.uint8)
+            cv2.putText(
+                canvas,
+                "no face",
+                (18, 58),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                (180, 180, 180),
+                1,
+                cv2.LINE_AA,
+            )
+            aligned = canvas
+        ok, jpeg = cv2.imencode(".jpg", aligned, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
+        if not ok:
+            raise HTTPException(status_code=500, detail="Could not encode aligned face")
+        return StreamingResponse(
+            iter([jpeg.tobytes()]),
+            media_type="image/jpeg",
+        )
 
     @app.delete("/identities/{name}")
     def delete_identity(name: str) -> JSONResponse:

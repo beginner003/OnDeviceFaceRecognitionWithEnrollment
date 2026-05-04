@@ -15,8 +15,8 @@ from __future__ import annotations
 import json
 import logging
 import math
+import argparse
 import shutil
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
@@ -33,6 +33,7 @@ from experiments.eval_utils import (
     print_summary_metrics,
 )
 from experiments.experiment_logging import setup_experiment_logging
+from experiments.memory_metrics import peak_delta_mb, snapshot_peak_memory
 from src.continual.exemplar_replay import ExemplarReplayConfig, ExemplarReplayStrategy
 from src.memory.herding import HerdingSelector
 from src.recognition.classifier_based import ClassifierRecognizer
@@ -90,46 +91,94 @@ def _load_embeddings(embeddings_root: Path, identity: str, split: str) -> np.nda
     return emb
 
 
-def main() -> int:
+def _ensure_workspace(workspace: Path, *, reset: bool) -> None:
+    if reset and workspace.exists():
+        shutil.rmtree(workspace, ignore_errors=True)
+    workspace.mkdir(parents=True, exist_ok=True)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Exemplar replay continual FR experiment.")
+    parser.add_argument(
+        "--supertask-json",
+        type=str,
+        default=str(SUPERTASK_JSON),
+        help="Path to the supertask JSON (default: data/supertask_8_2.json).",
+    )
+    parser.add_argument(
+        "--experiment-root",
+        type=str,
+        default=str(EXPERIMENT_ROOT),
+        help="Experiment directory root (default: experiments/replay_classifier).",
+    )
+    parser.add_argument(
+        "--reset-workspace",
+        action="store_true",
+        help="Delete and recreate the experiment workspace before running.",
+    )
+    parser.add_argument(
+        "--overwrite-embeddings",
+        action="store_true",
+        help="Recompute embeddings even if cached embeddings exist.",
+    )
+    parser.add_argument("--epochs", type=int, default=EPOCHS)
+    parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
+    parser.add_argument("--confidence-threshold", type=float, default=CONFIDENCE_THRESHOLD)
+    parser.add_argument("--max-new-exemplars", type=int, default=MAX_NEW_EXEMPLARS)
+    parser.add_argument("--exemplar-k", type=int, default=EXEMPLAR_K)
+    args = parser.parse_args(list(argv) if argv is not None else None)
+
     logging.basicConfig(level=logging.WARNING)
 
-    embeddings_root = EXPERIMENT_ROOT / "embeddings"
-    workspace_dir = Path(tempfile.mkdtemp(prefix="replay_integration_"))
-    logs_dir = EXPERIMENT_ROOT / "logs"
+    supertask_path = Path(args.supertask_json).expanduser().resolve()
+    experiment_root = Path(args.experiment_root).expanduser().resolve()
+    embeddings_root = experiment_root / "embeddings"
+    workspace_dir = experiment_root / "workspace"
+    _ensure_workspace(workspace_dir, reset=bool(args.reset_workspace))
+    logs_dir = experiment_root / "logs"
 
     loggers = setup_experiment_logging(log_dir=logs_dir, experiment_name="replay_integration")
     progress = loggers.progress
     metrics = loggers.metrics
+    mem_run_start = snapshot_peak_memory()
     metrics.info("========================================")
     metrics.info("Run configuration")
     metrics.info("  strategy: exemplar_replay")
-    metrics.info("  epochs: %d", EPOCHS)
-    metrics.info("  batch_size: %d", BATCH_SIZE)
-    metrics.info("  confidence_threshold: %.4f", CONFIDENCE_THRESHOLD)
-    metrics.info("  exemplar_k (stored per identity): %d", EXEMPLAR_K)
-    metrics.info("  max new-identity training samples: %d", MAX_NEW_EXEMPLARS)
+    metrics.info("  epochs: %d", int(args.epochs))
+    metrics.info("  batch_size: %d", int(args.batch_size))
+    metrics.info("  confidence_threshold: %.4f", float(args.confidence_threshold))
+    metrics.info("  exemplar_k (stored per identity): %d", int(args.exemplar_k))
+    metrics.info("  max new-identity training samples: %d", int(args.max_new_exemplars))
     metrics.info("========================================")
 
-    task_order, id_to_task_idx, identity_order = _load_supertask(SUPERTASK_JSON)
+    task_order, id_to_task_idx, identity_order = _load_supertask(supertask_path)
     all_identities = list(identity_order)
     task_column_names = [t.name for t in task_order]
 
     for ident in all_identities:
         progress.info("Embedding %s (train)", ident)
         embed_supertask_identities_to_root(
-            supertask_json_path=SUPERTASK_JSON,
+            supertask_json_path=supertask_path,
             output_root=embeddings_root,
             split="train",
             identities_filter=[ident],
+            overwrite=bool(args.overwrite_embeddings),
         )
     for ident in all_identities:
         progress.info("Embedding %s (test)", ident)
         embed_supertask_identities_to_root(
-            supertask_json_path=SUPERTASK_JSON,
+            supertask_json_path=supertask_path,
             output_root=embeddings_root,
             split="test",
             identities_filter=[ident],
+            overwrite=bool(args.overwrite_embeddings),
         )
+    mem_after_embedding = snapshot_peak_memory()
+    metrics.info(
+        "Peak memory after embedding: %.2f MB (delta +%.2f MB)",
+        mem_after_embedding.peak_rss_mb,
+        peak_delta_mb(mem_run_start, mem_after_embedding),
+    )
 
     train_embeddings: Dict[str, np.ndarray] = {
         ident: _load_embeddings(embeddings_root, ident, "train") for ident in all_identities
@@ -144,73 +193,91 @@ def main() -> int:
             ident, train_embeddings[ident].shape[0], test_embeddings[ident].shape[0],
         )
 
-    try:
-        system = FaceRecognitionSystem(
-            registration_strategy=ExemplarReplayStrategy(
-                config=ExemplarReplayConfig(
-                    epochs=EPOCHS,
-                    batch_size=BATCH_SIZE,
-                )
-            ),
-            exemplar_selector=HerdingSelector(),
-            recognition_strategy=ClassifierRecognizer(confidence_threshold=CONFIDENCE_THRESHOLD),
-            workspace=workspace_dir,
-            exemplar_k=EXEMPLAR_K,
-            confidence_threshold=CONFIDENCE_THRESHOLD,
-        )
-        system.load()
-
-        per_task_results: List[Dict[str, float]] = []
-        final_predictions = None
-        registered: List[str] = []
-        rng = np.random.default_rng(SEED)
-
-        for task in task_order:
-            for ident in task.identities:
-                emb = train_embeddings[ident]
-                if emb.shape[0] > MAX_NEW_EXEMPLARS:
-                    idx = rng.choice(emb.shape[0], MAX_NEW_EXEMPLARS, replace=False)
-                    emb = emb[idx]
-                progress.info("Registering %s (%d embeddings)", ident, emb.shape[0])
-                system.register(ident, emb)
-                registered.append(ident)
-
-            test_by_identity = {ident: test_embeddings[ident] for ident in registered}
-            per_class_acc, preds = evaluate_system(
-                system,
-                test_by_identity,
-                on_identity_start=lambda i: progress.info("Recognising %s on test images", i),
+    system = FaceRecognitionSystem(
+        registration_strategy=ExemplarReplayStrategy(
+            config=ExemplarReplayConfig(
+                epochs=int(args.epochs),
+                batch_size=int(args.batch_size),
             )
-            per_task_results.append(per_class_acc)
-            final_predictions = preds
-
-        A, identity_names = compute_accuracy_matrix(
-            per_task_results, task_column_names, id_to_task_idx,
+        ),
+        exemplar_selector=HerdingSelector(),
+        recognition_strategy=ClassifierRecognizer(confidence_threshold=float(args.confidence_threshold)),
+        workspace=workspace_dir,
+        exemplar_k=int(args.exemplar_k),
+        confidence_threshold=float(args.confidence_threshold),
+    )
+    system.load()
+    if not args.reset_workspace and system.identities():
+        raise RuntimeError(
+            "Workspace already contains a saved system state. "
+            "Use --reset-workspace to start fresh or remove the workspace manually."
         )
-        print_per_task_table(A, task_column_names, identity_names, logger=metrics)
-        summary = print_summary_metrics(A, logger=metrics)
 
-        forgetting = compute_forgetting(A)
-        for ident, f in zip(identity_names, forgetting.tolist()):
-            if math.isfinite(float(f)):
-                metrics.info("Forgetting %s: %.4f", ident, float(f))
+    per_task_results: List[Dict[str, float]] = []
+    final_predictions = None
+    registered: List[str] = []
+    rng = np.random.default_rng(SEED)
 
-        if final_predictions is not None:
-            print_confusion_matrix(
-                final_predictions,
-                registered_identities=identity_names,
-                logger=metrics,
-            )
+    for task in task_order:
+        mem_task_before = snapshot_peak_memory()
+        for ident in task.identities:
+            emb = train_embeddings[ident]
+            if emb.shape[0] > int(args.max_new_exemplars):
+                idx = rng.choice(emb.shape[0], int(args.max_new_exemplars), replace=False)
+                emb = emb[idx]
+            progress.info("Registering %s (%d embeddings)", ident, emb.shape[0])
+            system.register(ident, emb)
+            registered.append(ident)
 
-        progress.info("=" * 50)
-        progress.info("Results  (full detail in %s)", logs_dir / "evaluation.log")
-        progress.info("  average_accuracy:   %.4f", summary["average_accuracy"])
-        progress.info("  average_forgetting: %.4f", summary["average_forgetting"])
-        progress.info("  backward_transfer:  %.4f", summary["backward_transfer"])
-        progress.info("=" * 50)
+        test_by_identity = {ident: test_embeddings[ident] for ident in registered}
+        per_class_acc, preds = evaluate_system(
+            system,
+            test_by_identity,
+            on_identity_start=lambda i: progress.info("Recognising %s on test images", i),
+        )
+        per_task_results.append(per_class_acc)
+        final_predictions = preds
+        mem_task_after = snapshot_peak_memory()
+        metrics.info(
+            "Peak memory after %s: %.2f MB (delta +%.2f MB)",
+            task.name,
+            mem_task_after.peak_rss_mb,
+            peak_delta_mb(mem_task_before, mem_task_after),
+        )
 
-    finally:
-        shutil.rmtree(workspace_dir, ignore_errors=True)
+    A, identity_names = compute_accuracy_matrix(
+        per_task_results, task_column_names, id_to_task_idx,
+    )
+    print_per_task_table(A, task_column_names, identity_names, logger=metrics)
+    summary = print_summary_metrics(A, logger=metrics)
+
+    forgetting = compute_forgetting(A)
+    for ident, f in zip(identity_names, forgetting.tolist()):
+        if math.isfinite(float(f)):
+            metrics.info("Forgetting %s: %.4f", ident, float(f))
+
+    if final_predictions is not None:
+        print_confusion_matrix(
+            final_predictions,
+            registered_identities=identity_names,
+            logger=metrics,
+        )
+
+    mem_run_end = snapshot_peak_memory()
+    metrics.info(
+        "Overall peak memory: %.2f MB (run delta +%.2f MB)",
+        mem_run_end.peak_rss_mb,
+        peak_delta_mb(mem_run_start, mem_run_end),
+    )
+    progress.info("=" * 50)
+    progress.info("Results  (full detail in %s)", logs_dir / "evaluation.log")
+    progress.info("  average_accuracy:   %.4f", summary["average_accuracy"])
+    progress.info("  average_forgetting: %.4f", summary["average_forgetting"])
+    progress.info("  backward_transfer:  %.4f", summary["backward_transfer"])
+    progress.info("  workspace:          %s", workspace_dir)
+    progress.info("=" * 50)
+
+    metrics.info("Workspace retained at %s", workspace_dir)
 
     return 0
 
