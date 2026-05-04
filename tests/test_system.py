@@ -63,6 +63,34 @@ def test_system_save_load_roundtrip_classifier_recognition(tmp_path: Path) -> No
     assert pred_b == "bob"
 
 
+def test_system_synthetic_replay_persists_gaussian_parameters(tmp_path: Path) -> None:
+    cfg = SystemConfig(
+        registration="synthetic_replay",
+        exemplar_selection="herding",
+        recognition="classifier",
+        exemplar_k=6,
+        confidence_threshold=0.0,
+    )
+    system = FaceRecognitionSystem.from_config(cfg, workspace=tmp_path)
+    c1 = np.eye(1, 128, 0, dtype=np.float32).reshape(-1)
+    c2 = np.eye(1, 128, 1, dtype=np.float32).reshape(-1)
+
+    system.register("alice", _cluster(c1, n=10, seed=1))
+    assert (tmp_path / "gaussians" / "alice" / "gaussian.npz").is_file()
+    assert not any((tmp_path / "exemplars").rglob("*.npz"))
+
+    system.register("bob", _cluster(c2, n=10, seed=2))
+    assert (tmp_path / "gaussians" / "bob" / "gaussian.npz").is_file()
+    assert not any((tmp_path / "exemplars").rglob("*.npz"))
+
+    loaded = FaceRecognitionSystem.from_config(cfg, workspace=tmp_path)
+    assert loaded.gaussian_store.identities() == ["alice", "bob"]
+    loaded_params = loaded.gaussian_store.load_class("alice")
+    assert loaded_params.mean.shape == (128,)
+    assert loaded_params.cov.shape == (128, 128)
+    assert loaded_params.n_samples == 6
+
+
 def test_system_replay_stub_raises_clear_todo(tmp_path: Path) -> None:
     cfg = SystemConfig(
         registration="replay",

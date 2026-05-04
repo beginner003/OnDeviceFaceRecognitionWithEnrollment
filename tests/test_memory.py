@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from src.memory.exemplar_store import ExemplarStore
+from src.memory.gaussian_store import GaussianStore
 from src.memory.herding import herding_select, select_exemplar_indices
 
 
@@ -84,3 +85,42 @@ def test_exemplar_store_load_all_only_loads_valid_identity_dirs(tmp_path: Path) 
     assert ids == ["alice"]
     assert reloaded.identities() == ["alice"]
 
+
+def test_gaussian_store_fit_and_sample_synthetic_embeddings() -> None:
+    rng = np.random.default_rng(0)
+    emb = rng.normal(size=(6, 128)).astype(np.float32)
+    store = GaussianStore()
+
+    store.fit_gaussian("alice", emb)
+    assert store.identities() == ["alice"]
+    assert store.total_bytes() > 0
+
+    samples = store.sample_synthetic("alice", 10)
+    assert samples.shape == (10, 128)
+    norms = np.linalg.norm(samples, axis=1)
+    assert np.allclose(norms, 1.0, atol=1e-6)
+
+    store.remove("alice")
+    assert store.identities() == []
+    assert store.total_bytes() == 0
+
+
+def test_gaussian_store_roundtrip_save_load(tmp_path: Path) -> None:
+    rng = np.random.default_rng(13)
+    emb = rng.normal(size=(8, 128)).astype(np.float32)
+    store = GaussianStore(tmp_path)
+
+    store.fit_gaussian("alice", emb)
+    saved = store.save_class("alice")
+    assert saved.is_file()
+
+    reloaded_store = GaussianStore(tmp_path)
+    ids = reloaded_store.load_all()
+    assert ids == ["alice"]
+    assert reloaded_store.identities() == ["alice"]
+
+    loaded = reloaded_store.load_class("alice")
+    assert loaded.mean.shape == (128,)
+    assert loaded.cov.shape == (128, 128)
+    assert loaded.n_samples == emb.shape[0]
+    assert reloaded_store.total_bytes() > 0

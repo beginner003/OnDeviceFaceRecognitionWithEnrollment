@@ -13,6 +13,7 @@ from src.continual.classifier import CosineLinear
 from src.continual.exemplar_replay import ExemplarReplayConfig, incremental_train_replay
 from src.continual.lwf import LwFConfig, incremental_train_lwf
 from src.continual.naive_ft import NaiveFTConfig, incremental_train_naive
+from src.continual.synthetic_replay import SyntheticReplayConfig, incremental_train_synthetic_replay
 from src.memory.exemplar_store import ExemplarStore
 
 
@@ -250,3 +251,27 @@ def test_lwf_distillation_changes_old_class_optimization() -> None:
     assert with_distill.out_features == 3
     assert no_distill.out_features == 3
     assert not torch.allclose(no_distill.weight[:2], with_distill.weight[:2], atol=1e-5)
+
+
+def test_synthetic_replay_uses_classifier_order_for_old_classes(tmp_path) -> None:
+    from src.memory.gaussian_store import GaussianStore
+
+    rng = np.random.default_rng(60)
+    emb_a = _make_class_embeddings(rng, direction_seed=0, n=50)
+    emb_b = _make_class_embeddings(rng, direction_seed=100, n=50)
+    emb_c = _make_class_embeddings(rng, direction_seed=999, n=50)
+
+    base = CosineLinear(in_features=128, out_features=0)
+    warmup_cfg = SyntheticReplayConfig()
+    store = GaussianStore()
+    incremental_train_synthetic_replay(base, store, emb_a, "alice", config=warmup_cfg, device="cpu")
+    incremental_train_synthetic_replay(base, store, emb_b, "bob", config=warmup_cfg, device="cpu")
+    assert base.out_features == 2
+    assert getattr(base, "_class_names", ["alice", "bob"]) == ["alice", "bob"]
+
+    torch.manual_seed(0)
+    incremental_train_synthetic_replay(
+        base, store, emb_c, "carol", config=warmup_cfg, device="cpu"
+    )
+    assert base.out_features == 3
+    assert getattr(base, "_class_names", ["alice", "bob", "carol"]) == ["alice", "bob", "carol"]

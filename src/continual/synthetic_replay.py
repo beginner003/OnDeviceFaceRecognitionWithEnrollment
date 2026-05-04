@@ -1,4 +1,4 @@
-"""Naive fine-tuning baseline: expand head and train only on the new identity."""
+"""Synthetic replay strategy: generate synthetic embeddings via per-class Gaussians."""
 
 from __future__ import annotations
 
@@ -16,42 +16,33 @@ from src.memory.gaussian_store import GaussianStore
 
 
 @dataclass
-class NaiveFTConfig:
-    """Training hyperparameters aligned with IMPLEMENTATION_PLAN §5.5 / §6.2."""
+class SyntheticReplayConfig:
+    """Training hyperparameters for synthetic replay."""
 
     lr: float = 0.01
     momentum: float = 0.9
-    epochs: int = 5
+    epochs: int = 10
     batch_size: int = 32
+    synthetic_samples_per_class: int = 50  # How many synthetic samples to generate per replay class
 
 
-def incremental_train_naive(
+def incremental_train_synthetic_replay(
     classifier: CosineLinear,
+    store: GaussianStore,
     new_embeddings: np.ndarray,
+    identity: str,
     *,
     init_new_class_from_mean: bool = True,
-    config: NaiveFTConfig | None = None,
+    config: SyntheticReplayConfig | None = None,
     device: torch.device | str | None = None,
 ) -> CosineLinear:
     """
-    Add one output class (index = previous class count) and fine-tune **only** on
-    `new_embeddings` with cross-entropy. No replay; old-class accuracy typically drops
-    (catastrophic forgetting baseline per §6.1).
+    Add one class and fine-tune on new embeddings + synthetic samples from stored Gaussians.
 
-    Parameters
-    ----------
-    classifier
-        Cosine head; moved to `device` if given.
-    new_embeddings
-        Array of shape (N, 128), float32 recommended (L2-normalised embeddings expected).
-    init_new_class_from_mean
-        If True, initialise the new weight row from the mean direction of `new_embeddings`.
-    config
-        SGD / epoch / batch settings.
-    device
-        Training device; defaults to CPU.
+    This is the synthetic replay variant: instead of storing exemplars, we fit Gaussians
+    and sample synthetic embeddings for replay (§7 Strategy 3).
     """
-    cfg = config or NaiveFTConfig()
+    cfg = config or SyntheticReplayConfig()
     dev = torch.device(device or "cpu")
     classifier = classifier.to(dev)
 
@@ -65,24 +56,34 @@ def incremental_train_naive(
 
     init_arg = emb if init_new_class_from_mean else None
     classifier.expand(1, init_from_embeddings=init_arg)
-
     new_class_idx = classifier.out_features - 1
-    x_t = torch.from_numpy(emb).to(device=dev, dtype=torch.float32)
-    y_t = torch.full((emb.shape[0],), new_class_idx, dtype=torch.long, device=dev)
 
-    bs = max(1, min(cfg.batch_size, emb.shape[0]))
+    all_x, all_y = [], []
+
+    # Synthetic replay: generate samples from stored Gaussians for old classes in
+    # the classifier's current class index order.
+    for cls_idx, ident in enumerate(store.identities()):
+        if ident == identity:
+            continue
+        synthetic = store.sample_synthetic(ident, cfg.synthetic_samples_per_class)
+        all_x.append(synthetic)
+        all_y.append(np.full(synthetic.shape[0], cls_idx, dtype=np.int64))
+
+    # New class data
+    all_x.append(emb)
+    all_y.append(np.full(emb.shape[0], new_class_idx, dtype=np.int64))
+
+    x_t = torch.from_numpy(np.concatenate(all_x)).to(device=dev, dtype=torch.float32)
+    y_t = torch.from_numpy(np.concatenate(all_y)).to(device=dev)
+
+    bs = max(1, min(cfg.batch_size, x_t.shape[0]))
     loader = DataLoader(
-        TensorDataset(x_t, y_t),
-        batch_size=bs,
-        shuffle=True,
-        drop_last=False,
+        TensorDataset(x_t, y_t), batch_size=bs, shuffle=True, drop_last=False,
     )
 
     optimizer = SGD(classifier.parameters(), lr=cfg.lr, momentum=cfg.momentum)
     criterion = nn.CrossEntropyLoss()
 
-    # With a single output class, softmax cross-entropy is constant (loss 0) and
-    # gradients vanish — weights stay at expand() init. Learning starts once C >= 2.
     classifier.train()
     for _ in range(cfg.epochs):
         for xb, yb in loader:
@@ -96,26 +97,30 @@ def incremental_train_naive(
 
 
 @dataclass
-class NaiveFTStrategy:
-    """Protocol-compatible wrapper for the naive fine-tuning baseline."""
+class SyntheticReplayStrategy:
+    """Protocol-compatible wrapper for Gaussian synthetic replay."""
 
-    config: NaiveFTConfig = field(default_factory=NaiveFTConfig)
+    config: SyntheticReplayConfig = field(default_factory=SyntheticReplayConfig)
     device: torch.device | str | None = None
     init_new_class_from_mean: bool = True
 
     def update(
         self,
         classifier: CosineLinear,
-        store: ExemplarStore,
+        store: ExemplarStore,   # not used, just comply with the protocol
         gaussian_store: GaussianStore | None,
         new_embeddings: np.ndarray,
         identity: str,
     ) -> CosineLinear:
-        # `store`, `gaussian_store`, and `identity` are kept in signature for protocol consistency.
-        _ = (store, gaussian_store, identity)
-        return incremental_train_naive(
+        if gaussian_store is None:
+            raise ValueError("SyntheticReplayStrategy requires gaussian_store")
+        _ = store
+
+        return incremental_train_synthetic_replay(
             classifier=classifier,
+            store=gaussian_store,
             new_embeddings=new_embeddings,
+            identity=identity,
             init_new_class_from_mean=self.init_new_class_from_mean,
             config=self.config,
             device=self.device,

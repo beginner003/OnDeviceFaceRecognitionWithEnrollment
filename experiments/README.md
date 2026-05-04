@@ -49,9 +49,38 @@ Paths for `--supertask-json`, `--embeddings-root`, and `--workspace` may be abso
 
 ---
 
+## Synthetic replay classifier (`synthetic_replay_classifier`)
+
+Synthetic replay generates synthetic samples for old classes from a per-identity Gaussian model. In the current implementation, the Gaussian parameters are fit from the full set of extracted embeddings for each new identity rather than only the selected `exemplar_k` subset.
+
+Important persistence details:
+- Gaussian parameters are persisted under `workspace/gaussians/<identity>/gaussian.npz`.
+- If the Gaussian or workspace state is not preserved, synthetic replay for previously enrolled users cannot be reconstructed after restarting the system.
+
+Artifacts default to `experiments/synthetic_replay_classifier/embeddings/` and `experiments/synthetic_replay_classifier/workspace/`.
+
+```bash
+python -m experiments.synthetic_replay_classifier.run --reset-workspace
+```
+
+| Flag | Description |
+|------|-------------|
+| `--supertask-json PATH` | Supertask JSON (default: `data/supertask_8_2.json`). |
+| `--experiment-root PATH` | Experiment root directory (default: `experiments/synthetic_replay_classifier`). |
+| `--reset-workspace` | Delete and recreate the `workspace/` directory before running. |
+| `--overwrite-embeddings` | Recompute embeddings even if cached data exists. |
+| `--confidence-threshold FLOAT` | Recognition threshold for classifier-based recognition (default: `0.1`). |
+| `--epochs INT` | Number of SGD epochs for each incremental update (default: `10`). |
+| `--batch-size INT` | SGD mini-batch size for each incremental update (default: `10`). |
+| `--synthetic-samples-per-class INT` | Synthetic replay samples generated per old class (default: `5`). |
+| `--exemplar-k INT` | Number of exemplars stored per identity for the system interface (default: `5`). In this experiment, Gaussian parameters are fit from the full embedding set, so `exemplar_k` does not limit the Gaussian fit. |
+
+---
+
 ## Help
 
 ```bash
 PYTHONPATH=. python experiments/baseline_classifier/run.py --help
 PYTHONPATH=. python experiments/baseline_ncm/run.py --help
+
 ```

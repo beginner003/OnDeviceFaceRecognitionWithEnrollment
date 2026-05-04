@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Continual Face Recognition</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="top">
+    <div>
+      <h1>On-device continual face recognition</h1>
+      <p class="sub">Raspberry Pi · Intel RealSense · MobileFaceNet · selectable continual learner</p>
+    </div>
+    <div class="status-pill" id="statusPill">…</div>
+  </header>
+
+  <main class="layout">
+    <section class="video-panel">
+      <div class="toolbar">
+        <div class="mode-toggle" role="group" aria-label="Operation mode">
+          <button type="button" id="btnModeRec" class="active">Recognition</button>
+          <button type="button" id="btnModeReg">Register</button>
+        </div>
+        <span class="hint" id="modeHint">Live identification on the largest face in view.</span>
+      </div>
+      <div class="video-wrap">
+        <img id="feed" alt="camera feed" src="/video_feed?mode=recognition" />
+      </div>
+    </section>
+
+    <aside class="sidebar">
+      <section class="card">
+        <h2>Continual learning settings</h2>
+        <p class="fineprint">Editable until the first person is enrolled; then locked for consistency.</p>
+        <form id="settingsForm">
+          <label>
+            Registration method
+            <select name="registration" id="fieldRegistration">
+              <option value="naive">Naive fine-tuning (baseline)</option>
+              <option value="replay">Exemplar replay (iCaRL-style)</option>
+              <option value="replay_lwf" selected>Replay + LwF distillation</option>
+              <option value="synthetic_replay">Synthetic Gaussian replay</option>
+            </select>
+          </label>
+          <label>
+            Exemplar selection
+            <select name="exemplar_selection" id="fieldExemplarSel">
+              <option value="herding" selected>Herding</option>
+              <option value="random">Random</option>
+            </select>
+          </label>
+          <label>
+            Recognition head
+            <select name="recognition" id="fieldRecognition">
+              <option value="classifier" selected>Classifier (cosine linear)</option>
+              <option value="ncm">Nearest class mean</option>
+            </select>
+          </label>
+          <label>
+            Exemplars per class (K)
+            <input type="number" name="exemplar_k" id="fieldExemplarK" min="5" max="200" value="50" />
+          </label>
+          <label>
+            Confidence threshold
+            <input type="number" name="confidence_threshold" id="fieldThr" min="0" max="1" step="0.05" value="0.5" />
+          </label>
+          <button type="submit" id="btnSaveSettings">Save settings</button>
+          <p id="settingsMsg" class="msg"></p>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Register new person</h2>
+        <form id="registerForm">
+          <label>
+            Display name
+            <input type="text" name="name" id="regName" required maxlength="64" placeholder="e.g. alice" autocomplete="off" />
+          </label>
+          <label>
+            Total samples (≥6, split: face-on · turn left · turn right)
+            <input type="number" name="n_frames" id="regFrames" min="6" max="120" value="24" />
+          </label>
+          <p class="fineprint">
+            Switch to <strong>Register</strong> mode for the live feed, then start — you will be asked to face the camera,
+            then turn slowly left, then right while we collect embeddings in RAM; one enroll call saves to disk.
+          </p>
+          <button type="submit" id="btnRegister">Start registration</button>
+        </form>
+        <div class="progress" id="regProgress" hidden>
+          <div class="bar"><div class="fill" id="regBar"></div></div>
+          <p id="regMsg" class="msg"></p>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Enrolled identities</h2>
+        <button type="button" id="btnRefreshIds" class="secondary">Refresh list</button>
+        <ul id="identityList" class="identity-list"></ul>
+      </section>
+    </aside>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
