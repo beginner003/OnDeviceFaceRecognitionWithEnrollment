@@ -77,18 +77,13 @@ def _iter_embedding_fixture_images() -> tuple[Path, ...]:
     return tuple(images)
 
 
-def _has_tflite_runtime() -> bool:
+def _has_ai_edge_litert() -> bool:
     try:
-        import tflite_runtime.interpreter  # type: ignore  # noqa: F401
+        import ai_edge_litert.interpreter  # type: ignore  # noqa: F401
 
         return True
     except Exception:
-        try:
-            import tensorflow.lite  # type: ignore  # noqa: F401
-
-            return True
-        except Exception:
-            return False
+        return False
 
 
 def _load_bgr(path: Path) -> np.ndarray:
@@ -187,10 +182,10 @@ def test_mobilefacenet_on_aligned_fixture_faces_logs_latency(
             "Missing embedding fixture images. Add aligned/cropped faces to "
             "tests/data/alignment_embedding/positive/."
         )
-    if not _has_tflite_runtime():
+    if not _has_ai_edge_litert():
         pytest.skip(
-            "TensorFlow Lite runtime not available. Install `tflite-runtime` or `tensorflow` "
-            "in the active test environment."
+            "ai_edge_litert is not available. On Raspberry Pi 5, install project "
+            "requirements in the active venv before running embedding integration tests."
         )
 
     try:

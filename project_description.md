@@ -33,7 +33,7 @@ Hardware may use
 • Rasberry pi 5 (8GB) ×1 
 • intel real sense 
 Software may use 
-• PyTorch with TensorRT for deployment 
-• Face recognition models: ArcFace, FaceNet, or MobileFaceNet 
-• Continual learning: Avalanche library or custom implementation 
+• PyTorch CPU for the lightweight classifier head 
+• Face recognition model: MobileFaceNet via TensorFlow Lite on Raspberry Pi 5
+• Continual learning: custom implementation optimized for on-device evaluation
 • Datasets: VGGFace2, MS-Celeb-1M (subsets)

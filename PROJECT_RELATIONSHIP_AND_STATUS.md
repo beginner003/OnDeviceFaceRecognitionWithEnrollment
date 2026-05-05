@@ -93,15 +93,11 @@ flowchart TD
    - memory usage (RSS + store sizes)
 4. Execute and record the required on-device scenario (5 initial + 3 incremental).
 
-## 6) Local Supertask Experiment Pass (2026-05-05)
+## 6) Previous Local Supertask Experiment Pass (Superseded For Final Metrics)
 
 Environment:
 - Python: `.venv311` (`Python 3.11.3`)
-- Repaired local macOS vision stack for experiment execution:
-  - `numpy==1.26.4`
-  - `opencv-contrib-python==4.9.0.80`
-  - `mediapipe==0.10.14`
-  - `tensorflow==2.16.2`
+- Previous desktop-only vision stack used before the Raspberry Pi 5-only cleanup. These results are retained as historical method-comparison notes only and are not final deployment metrics.
 - Smoke test: one image from `data/val/n000001/0001_01.jpg` successfully produced one `(1, 128)` MobileFaceNet embedding.
 - Supertask data check: `data/supertask_8_2.json` contains 10 identities across 5 tasks; all referenced train/test image paths exist locally.
 
@@ -129,21 +125,20 @@ Interpretation:
 - Exemplar replay and synthetic replay are the best classifier-based results in this pass.
 - NCM remains a strong non-training baseline for this 10-person supertask.
 - Naive classifier and no-replay LwF show clear forgetting/instability under this protocol.
-- All measured peak RSS values are below the Raspberry Pi 5 8 GB target, but these are macOS process measurements, not on-device Pi measurements.
+- These results are useful for method comparison only. Final time and memory numbers must come from Raspberry Pi 5 runs.
 
 Runner changes made during this pass:
 - `experiments/replay_classifier/run.py` and `experiments/lwf_classifier/run.py` now support the same clean-run CLI shape as the other runners and retain their workspaces.
 - `experiments/synthetic_replay_classifier/run.py` now logs peak RSS memory snapshots and retained workspace path.
 
 Pi / RealSense compatibility notes:
-- This run was local-only, per current scope. No SSH deployment or RealSense hardware validation was performed.
-- Offline experiments do not require `pyrealsense2`.
-- The UI/capture path still targets RealSense on Raspberry Pi via `pyrealsense2`, with OpenCV fallback for local development.
+- Offline experiments should now be renewed on Raspberry Pi 5 with `PYTHONPATH=. python experiments/run_all_pi_experiments.py`.
+- The UI/capture path requires RealSense on Raspberry Pi via `pyrealsense2`; there is no OpenCV webcam fallback.
 - On Pi/aarch64, `pyrealsense2` is not expected to install from the normal PyPI wheel path; it should be built/installed from Librealsense as noted in `requirements.txt`.
 
 Verification:
 - Python compile check passed for changed experiment/UI Python files.
 - Focused non-integration tests passed: `37 passed, 4 deselected`.
 - FastAPI route registration check passed for `/video_feed`, `/pipeline/status`, and `/pipeline/aligned_face.jpg`.
-- Full selected test run initially showed one MediaPipe integration failure: `tests/test_detection.py::test_positive_fixture_images_have_face_detections` did not detect a face in `pos1.png` with the local macOS MediaPipe stack. This is a local detector/runtime fixture sensitivity; Pi RealSense validation remains a separate hardware step.
+- Full selected test run initially showed one MediaPipe integration failure: `tests/test_detection.py::test_positive_fixture_images_have_face_detections` did not detect a face in `pos1.png` with the old desktop MediaPipe stack. Pi RealSense validation remains a separate hardware step.
 

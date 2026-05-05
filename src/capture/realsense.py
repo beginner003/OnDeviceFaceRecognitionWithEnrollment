@@ -1,4 +1,4 @@
-"""RealSense camera capture with OpenCV fallback."""
+"""RealSense camera capture for the Raspberry Pi 5 runtime."""
 
 from __future__ import annotations
 
@@ -7,10 +7,8 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
-import cv2
 import numpy as np
 
-# I manually install pyrealsense2 to pi from source code, should be ok now
 try:
     import pyrealsense2 as rs
 except ImportError:  # pragma: no cover
@@ -27,7 +25,7 @@ class FramePacket:
 
 
 class RealSenseCapture:
-    """Threaded frame capture from Intel RealSense, with webcam fallback."""
+    """Threaded frame capture from Intel RealSense."""
 
     def __init__(
         self,
@@ -35,16 +33,13 @@ class RealSenseCapture:
         height: int = 480,
         fps: int = 30,
         use_depth: bool = False,
-        fallback_camera_index: int = 2,
     ) -> None:
         self.width = width
         self.height = height
         self.fps = fps
         self.use_depth = use_depth
-        self.fallback_camera_index = fallback_camera_index
 
         self._pipeline = None
-        self._capture = None
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._latest: Optional[FramePacket] = None
@@ -86,55 +81,34 @@ class RealSenseCapture:
         return packet.bgr if packet is not None else None
 
     def _open_device(self) -> None:
-        # Try RealSense only if SDK is available
-        if rs is not None:
-            try:
-                pipeline = rs.pipeline()
-                cfg = rs.config()
-                cfg.enable_stream(rs.stream.color, self.width, self.height, rs.format.bgr8, self.fps)
-                if self.use_depth:
-                    cfg.enable_stream(rs.stream.depth, self.width, self.height, rs.format.z16, self.fps)
-                pipeline.start(cfg)
-                self._pipeline = pipeline
-                self._source = "realsense"
-                return
-            except Exception:
-                self._pipeline = None
+        if rs is None:
+            raise RuntimeError(
+                "pyrealsense2 is required on Raspberry Pi 5. Install librealsense "
+                "and its Python bindings before launching the UI."
+            )
 
-        # Fallback to OpenCV – respect environment variable or use default index
-        # but it is problematic and see grayscale with many dots
-        # but should be ok to use pyrealsense2 now intead of this
-        import os
-        env_source = os.getenv("FACE_UI_CAMERA_SOURCE")
-        if env_source is not None:
-            try:
-                idx = int(env_source)
-            except ValueError:
-                idx = self.fallback_camera_index
-        else:
-            idx = self.fallback_camera_index
+        try:
+            pipeline = rs.pipeline()
+            cfg = rs.config()
+            cfg.enable_stream(rs.stream.color, self.width, self.height, rs.format.bgr8, self.fps)
+            if self.use_depth:
+                cfg.enable_stream(rs.stream.depth, self.width, self.height, rs.format.z16, self.fps)
+            pipeline.start(cfg)
+        except Exception as exc:
+            self._pipeline = None
+            self._source = "none"
+            raise RuntimeError(
+                "Could not start the Intel RealSense camera. Check that the camera "
+                "is connected, accessible, and supported by the installed librealsense build."
+            ) from exc
 
-        cap = cv2.VideoCapture(idx, cv2.CAP_V4L2)   # explicitly use V4L2 backend
-
-        # Force UYVY format
-        fourcc = cv2.VideoWriter_fourcc('U', 'Y', 'V', 'Y')
-        cap.set(cv2.CAP_PROP_FOURCC, fourcc)
-
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-        cap.set(cv2.CAP_PROP_FPS, self.fps)
-        if not cap.isOpened():
-            raise RuntimeError(f"Could not open camera with index {idx} (device /dev/video{idx})")
-        self._capture = cap
-        self._source = "opencv"
+        self._pipeline = pipeline
+        self._source = "realsense"
 
     def _close_device(self) -> None:
         if self._pipeline is not None:
             self._pipeline.stop()
             self._pipeline = None
-        if self._capture is not None:
-            self._capture.release()
-            self._capture = None
         self._source = "none"
 
     def _capture_loop(self) -> None:
@@ -160,16 +134,4 @@ class RealSenseCapture:
                     depth_arr = np.asanyarray(depth_frame.get_data())
             return FramePacket(bgr=bgr, depth=depth_arr, timestamp=time.time())
 
-        if self._capture is not None:
-            ok, frame = self._capture.read()
-            if not ok:
-                return None
-            if len(frame.shape) == 2:   # grayscale
-                frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
-            elif frame.shape[2] == 3 and frame.dtype == np.uint8:
-                # Already BGR? OpenCV returns BGR by default, but if it's UYVY raw, convert
-                # Check if it looks like UYVY (unlikely), but we can convert to BGR safely
-                # Actually OpenCV does the conversion automatically when CAP_PROP_FOURCC is set.
-                pass
-            return FramePacket(bgr=frame, depth=None, timestamp=time.time())
         return None

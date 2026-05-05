@@ -147,10 +147,10 @@ OnDeviceFaceRecognitionWithEnrollment/
 | Layer | Choice | Rationale |
 |---|---|---|
 | **Face detection** | MediaPipe BlazeFace (short-range TFLite model) | ~5 ms on ARM; already have `blaze_face_full_range.tflite` in repo |
-| **Face embedding** | MobileFaceNet via TensorFlow Lite interpreter | 0.99 M params, 128-dim output, ~15-30 ms on RPi 5 CPU; designed for edge; same runtime as BlazeFace detector |
-| **Continual learning framework** | Custom PyTorch (CPU) + optional Avalanche for offline prototyping | Avalanche for rapid experimentation on laptop; lightweight custom code for RPi |
+| **Face embedding** | MobileFaceNet via `ai_edge_litert` TensorFlow Lite interpreter | 0.99 M params, 128-dim output, ~15-30 ms on RPi 5 CPU; designed for edge; same runtime family as BlazeFace detector |
+| **Continual learning framework** | Custom PyTorch (CPU) | Lightweight custom code for RPi 5 |
 | **Classifier** | Cosine-normalised `nn.Linear(128, N)` in PyTorch CPU | Tiny, fast to train; cosine normalisation gives better few-shot performance |
-| **Camera SDK** | `pyrealsense2` + OpenCV | Required for Intel RealSense depth camera |
+| **Camera SDK** | `pyrealsense2` | Required for Intel RealSense depth camera on Raspberry Pi 5 |
 | **Web server** | FastAPI + Uvicorn | Async, lightweight; MJPEG streaming support |
 | **Profiling** | `psutil`, `/proc/self/status` | RAM and CPU monitoring on RPi 5 |
 | **Datasets** | VGGFace2 subset (20-30 identities), optionally MS-Celeb-1M subset | Standard benchmarks specified by project brief |
@@ -159,20 +159,17 @@ OnDeviceFaceRecognitionWithEnrollment/
 ### Key Python Dependencies
 
 ```
-tensorflow-lite>=2.14   # or tflite-runtime for RPi 5
-opencv-python-headless>=4.9
-mediapipe>=0.10
-torch>=2.2 (CPU wheel)
-numpy>=1.26
-scikit-learn>=1.4
-fastapi>=0.110
-uvicorn[standard]>=0.29
-psutil>=5.9
-pyrealsense2>=2.55
+fastapi>=0.109
+uvicorn[standard]>=0.27
 jinja2>=3.1
-Pillow>=10.2
-matplotlib>=3.8
-avalanche-lib>=0.5   # laptop only, for offline prototyping
+python-multipart>=0.0.9
+numpy>=1.24
+opencv-python-headless>=4.8
+mediapipe==0.10.18
+psutil
+torch>=2.0
+ai_edge_litert
+# pyrealsense2 is required but installed manually from Librealsense on Pi aarch64.
 ```
 
 ---
@@ -185,7 +182,7 @@ avalanche-lib>=0.5   # laptop only, for offline prototyping
 │  Owns: camera lifecycle, live video overlay, user interaction              │
 │                                                                             │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  CAMERA INPUT (Intel RealSense — pyrealsense2 + OpenCV)            │    │
+│  │  CAMERA INPUT (Intel RealSense — pyrealsense2)                     │    │
 │  │  RGB stream @ 640×480, optional depth for liveness                  │    │
 │  └──────────────────────────┬──────────────────────────────────────────┘    │
 │                              ▼                                              │
@@ -277,7 +274,7 @@ avalanche-lib>=0.5   # laptop only, for offline prototyping
 | RGB resolution | 640×480 @ 30 FPS |
 | Depth stream | Optional; used for liveness (reject flat photos) and distance filtering (ignore faces >2 m) |
 | Output | NumPy array `(480, 640, 3)` BGR |
-| Fallback | OpenCV `VideoCapture(0)` for laptop development without RealSense |
+| Fallback | None; Pi runtime requires a connected Intel RealSense camera |
 
 **Key implementation:**
 - Context manager wrapping the RealSense pipeline for clean start/stop
@@ -769,7 +766,7 @@ Comfortably within the 8 GB budget (R11).
 
 ## 8. Evaluation Protocol
 
-### 8.1 Offline Evaluation (Laptop / Desktop)
+### 8.1 Offline Evaluation (Raspberry Pi 5)
 
 **Dataset:** VGGFace2 subset — select 20 identities, ~100 images each.
 
@@ -791,7 +788,7 @@ Comfortably within the 8 GB budget (R11).
 3. Evaluate on held-out test set of **all identities seen so far**
 4. Log: accuracy, per-class accuracy, forgetting, training time, peak RAM
 
-**Tool:** Avalanche library for scenario setup and metrics on laptop; custom `src/evaluation/benchmark.py` for the actual runs.
+**Tool:** Pi-side experiment runners under `experiments/`, with `experiments/run_all_pi_experiments.py` renewing all logs.
 
 ### 8.2 On-Device Evaluation (Raspberry Pi 5)
 
@@ -845,8 +842,8 @@ Comfortably within the 8 GB budget (R11).
 
 **Week 1 — Environment & Literature**
 - [ ] Set up RPi 5: flash OS, install dependencies, test RealSense camera
-- [ ] Set up dev environment on laptop (PyTorch, Avalanche, TFLite runtime)
-- [ ] Read core papers: iCaRL, LwF, MobileFaceNet, Avalanche
+- [ ] Set up Pi Python environment (PyTorch CPU, `ai_edge_litert`, MediaPipe)
+- [ ] Read core papers: iCaRL, LwF, MobileFaceNet
 - [ ] Download and curate VGGFace2 subset (20 identities, ~100 images each)
 
 **Week 2 — Baseline Face Recognition Pipeline**
@@ -854,7 +851,7 @@ Comfortably within the 8 GB budget (R11).
 - [ ] Implement `src/detection/blazeface.py` (face detection)
 - [ ] Implement `src/alignment/align.py` (landmark-based alignment)
 - [ ] Implement `src/embedding/mobilefacenet.py` (TFLite embedding extraction)
-- [ ] Build and test non-incremental face recognition on laptop (NCM on 5 people)
+- [ ] Build and test non-incremental face recognition on Raspberry Pi 5 (NCM on 5 people)
 
 **Week 3 — Port to RPi 5**
 - [ ] Obtain MobileFaceNet TFLite float32 model for ARM deployment

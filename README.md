@@ -1,6 +1,6 @@
 # OnDeviceFaceRecognitionWithEnrollment
 
-On-device continual face recognition with forgetting prevention. The project provides an incremental registration + recognition pipeline, plus evaluation code and unit/integration tests.
+Raspberry Pi 5 on-device continual face recognition with forgetting prevention. The project provides a RealSense-based registration + recognition UI, evaluation scripts, and unit/integration tests for Pi-side validation.
 
 ## Read before you start
 Please read `IMPLEMENTATION_PLAN.md` (module breakdown, architecture decisions, and how the pieces fit together).
@@ -8,6 +8,42 @@ Please read `IMPLEMENTATION_PLAN.md` (module breakdown, architecture decisions, 
 ## What’s included
 - Pre-trained TFLite models in `src/models/`
 - Dataset/enrollment fixtures in `data/`
+- FastAPI browser UI in `src/ui/`
+- Continual-learning experiments in `experiments/`
+
+## Raspberry Pi 5 setup
+
+This repo is intentionally Pi-only. Use 64-bit Raspberry Pi OS on Raspberry Pi 5.
+
+Install Intel RealSense support before launching the UI. `pyrealsense2` is required at runtime, but it is not installed from `requirements.txt` because Raspberry Pi / Linux aarch64 has no normal PyPI wheel. Build/install Librealsense and its Python bindings for the Pi environment first.
+
+```bash
+python3.11 -m venv venv
+source venv/bin/activate
+python --version  # expect Python 3.11.x on Raspberry Pi OS
+pip install -r requirements.txt
+
+python - <<'PY'
+import pyrealsense2
+import ai_edge_litert.interpreter
+print("Pi RealSense + TFLite runtime imports OK")
+PY
+```
+
+## Launch the UI
+
+Run from the repository root on the Pi:
+
+```bash
+export PYTHONPATH=.
+export FACE_UI_WORKSPACE=data/ui_workspace
+export FACE_UI_CAPTURE_WIDTH=640
+export FACE_UI_CAPTURE_HEIGHT=480
+export FACE_UI_CAPTURE_FPS=30
+python -m src.ui.app
+```
+
+Open `http://<pi-ip>:8000/` from a browser on the same network. The UI requires a connected Intel RealSense camera and fails fast if `pyrealsense2` or the device is unavailable.
 
 ## How to use `FaceRecognitionSystem`
 
@@ -62,19 +98,13 @@ system = FaceRecognitionSystem.from_config(cfg, workspace=workspace)
 name, conf = system.recognize(query)
 ```
 
-## Create a virtual environment (for testing)
-```bash
-python3.11 -m venv venv
-source venv/bin/activate
-python --version  # expect Python 3.11.x
-pip install -r requirements.txt
-```
-
 ## Run tests
+
 ```bash
-pytest -m "not integration"
-pytest -m integration
+PYTHONPATH=. python -m pytest -m "not integration"
+PYTHONPATH=. python -m pytest -m integration
 ```
 
 Notes:
-- `integration` tests may require optional runtime dependencies and real image fixtures.
+- Integration tests require Pi runtime dependencies, TFLite models under `src/models/`, and real image fixtures.
+- Hardware UI validation requires the RealSense camera on the Raspberry Pi 5.

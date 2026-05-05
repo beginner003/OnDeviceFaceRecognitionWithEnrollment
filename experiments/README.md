@@ -1,6 +1,6 @@
 # Experiments
 
-Baseline continual face-recognition runs use pre-extracted embeddings from [`embedding_helper.py`](embedding_helper.py) (detect → align → MobileFaceNet). Run scripts from the **repository root** with the root on `PYTHONPATH` so `experiments` and `src` resolve.
+Baseline continual face-recognition runs use pre-extracted embeddings from [`embedding_helper.py`](embedding_helper.py) (detect -> align -> MobileFaceNet). Run scripts on the **Raspberry Pi 5** from the repository root with the root on `PYTHONPATH` so `experiments` and `src` resolve.
 
 ```bash
 cd /path/to/OnDeviceFaceRecognitionWithEnrollment
@@ -8,6 +8,24 @@ export PYTHONPATH=.
 ```
 
 Embedding extraction needs OpenCV (`cv2`) and a MobileFaceNet `.tflite` under `src/models/` (or set `MOBILEFACENET_TFLITE` / `MOBILEFACENET_MODEL_VARIANT` as in the helper).
+
+Each experiment renews its own `logs/evaluation.log` on every run. Logs report the midterm metrics: overall/per-class accuracy, forgetting/backward transfer, registration/update time, evaluation time, overall runtime, and peak RSS memory.
+
+---
+
+## Renew all Pi experiment logs
+
+After the Pi has the dataset, TFLite models, and dependencies installed:
+
+```bash
+PYTHONPATH=. python experiments/run_all_pi_experiments.py
+```
+
+This runs every experiment with `--reset-workspace --overwrite-embeddings` and writes a top-level refresh log to `experiments/logs/pi_experiment_refresh.log`. To renew only the evaluation logs while reusing cached embeddings:
+
+```bash
+PYTHONPATH=. python experiments/run_all_pi_experiments.py --reuse-embeddings
+```
 
 ---
 
@@ -60,7 +78,7 @@ Important persistence details:
 Artifacts default to `experiments/synthetic_replay_classifier/embeddings/` and `experiments/synthetic_replay_classifier/workspace/`.
 
 ```bash
-python -m experiments.synthetic_replay_classifier.run --reset-workspace
+PYTHONPATH=. python experiments/synthetic_replay_classifier/run.py --reset-workspace
 ```
 
 | Flag | Description |
@@ -82,5 +100,7 @@ python -m experiments.synthetic_replay_classifier.run --reset-workspace
 ```bash
 PYTHONPATH=. python experiments/baseline_classifier/run.py --help
 PYTHONPATH=. python experiments/baseline_ncm/run.py --help
-
+PYTHONPATH=. python experiments/replay_classifier/run.py --help
+PYTHONPATH=. python experiments/lwf_classifier/run.py --help
+PYTHONPATH=. python experiments/synthetic_replay_classifier/run.py --help
 ```

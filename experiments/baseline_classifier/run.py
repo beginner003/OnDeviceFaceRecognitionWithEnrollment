@@ -4,6 +4,7 @@ import argparse
 import json
 import logging
 import math
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
@@ -157,6 +158,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     progress = loggers.progress
     metrics = loggers.metrics
     mem_run_start = snapshot_peak_memory()
+    run_started_at = time.perf_counter()
     metrics.info("========================================")
     metrics.info("Run configuration")
     metrics.info("  epochs: %d", int(args.epochs))
@@ -170,6 +172,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     task_column_names = [t.name for t in task_order]
 
     # 1) Embed (train + test), one identity at a time for readable terminal progress.
+    embedding_started_at = time.perf_counter()
     for ident in all_identities:
         progress.info("Embedding started for person %s (train)", ident)
         embed_supertask_identities_to_root(
@@ -194,6 +197,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         mem_after_embedding.peak_rss_mb,
         peak_delta_mb(mem_run_start, mem_after_embedding),
     )
+    metrics.info("Embedding time seconds: %.3f", time.perf_counter() - embedding_started_at)
 
     _ensure_clean_workspace(workspace_dir, reset=bool(args.reset_workspace))
     confidence_threshold = float(args.confidence_threshold)
@@ -229,21 +233,33 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     registered: List[str] = []
     for task in task_order:
+        task_started_at = time.perf_counter()
         mem_task_before = snapshot_peak_memory()
+        registration_started_at = time.perf_counter()
         for ident in task.identities:
             progress.info("Registering person %s", ident)
             system.register(ident, train_embeddings[ident])
             registered.append(ident)
+        registration_seconds = time.perf_counter() - registration_started_at
 
         test_by_identity = {ident: test_embeddings[ident] for ident in registered}
+        evaluation_started_at = time.perf_counter()
         per_class_acc, preds = evaluate_system(
             system,
             test_by_identity,
             on_identity_start=lambda i: progress.info("Recognising %s on test images", i),
         )
+        evaluation_seconds = time.perf_counter() - evaluation_started_at
         per_task_results.append(per_class_acc)
         final_predictions = preds
         mem_task_after = snapshot_peak_memory()
+        metrics.info(
+            "Timing after %s: registration/update %.3f s, evaluation %.3f s, task total %.3f s",
+            task.name,
+            registration_seconds,
+            evaluation_seconds,
+            time.perf_counter() - task_started_at,
+        )
         metrics.info(
             "Peak memory after %s: %.2f MB (delta +%.2f MB)",
             task.name,
@@ -273,6 +289,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         mem_run_end.peak_rss_mb,
         peak_delta_mb(mem_run_start, mem_run_end),
     )
+    metrics.info("Overall run time seconds: %.3f", time.perf_counter() - run_started_at)
 
     return 0
 

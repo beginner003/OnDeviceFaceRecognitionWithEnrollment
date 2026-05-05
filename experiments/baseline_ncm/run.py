@@ -5,6 +5,7 @@ import json
 import logging
 import math
 import shutil
+import time
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -93,6 +94,7 @@ def main() -> None:
     progress = loggers.progress
     metrics = loggers.metrics
     mem_run_start = snapshot_peak_memory()
+    run_started_at = time.perf_counter()
 
     if args.reset_workspace and workspace.exists():
         shutil.rmtree(workspace)
@@ -102,6 +104,7 @@ def main() -> None:
 
     from experiments.embedding_helper import embed_supertask_identities_to_root
 
+    embedding_started_at = time.perf_counter()
     for ident in all_identities:
         progress.info("Embedding started for person %s (train)", ident)
         embed_supertask_identities_to_root(
@@ -126,6 +129,7 @@ def main() -> None:
         mem_after_embedding.peak_rss_mb,
         peak_delta_mb(mem_run_start, mem_after_embedding),
     )
+    metrics.info("Embedding time seconds: %.3f", time.perf_counter() - embedding_started_at)
 
     train_embeddings = embed_supertask_identities_to_root(
         supertask_json_path=supertask_json,
@@ -153,22 +157,34 @@ def main() -> None:
     final_predictions = None
 
     for task_name in task_order:
+        task_started_at = time.perf_counter()
         mem_task_before = snapshot_peak_memory()
+        registration_started_at = time.perf_counter()
         for identity in tasks.get(task_name, []):
             progress.info("Registering person %s", identity)
             emb = np.asarray(train_embeddings[identity], dtype=np.float32)
             system.register(identity, emb)
+        registration_seconds = time.perf_counter() - registration_started_at
 
         registered = system.identities()
         test_subset = {ident: test_embeddings[ident] for ident in registered}
+        evaluation_started_at = time.perf_counter()
         per_class_acc, predictions = evaluate_system(
             system,
             test_subset,
             on_identity_start=lambda i: progress.info("Recognising %s on test images", i),
         )
+        evaluation_seconds = time.perf_counter() - evaluation_started_at
         final_predictions = predictions
         per_task_results.append(per_class_acc)
         mem_task_after = snapshot_peak_memory()
+        metrics.info(
+            "Timing after %s: registration/update %.3f s, evaluation %.3f s, task total %.3f s",
+            task_name,
+            registration_seconds,
+            evaluation_seconds,
+            time.perf_counter() - task_started_at,
+        )
         metrics.info(
             "Peak memory after %s: %.2f MB (delta +%.2f MB)",
             task_name,
@@ -198,6 +214,7 @@ def main() -> None:
         mem_run_end.peak_rss_mb,
         peak_delta_mb(mem_run_start, mem_run_end),
     )
+    metrics.info("Overall run time seconds: %.3f", time.perf_counter() - run_started_at)
 
 if __name__ == "__main__":
     main()

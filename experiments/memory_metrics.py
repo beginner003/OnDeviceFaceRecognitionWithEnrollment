@@ -8,12 +8,11 @@ from dataclasses import dataclass
 
 
 def _maxrss_bytes() -> int:
-    """Return process peak RSS in bytes (normalized across Unix platforms)."""
+    """Return process peak RSS in bytes on Raspberry Pi OS / Linux."""
+    if platform.system() != "Linux":
+        raise RuntimeError("Experiment memory metrics are supported only on Raspberry Pi OS / Linux.")
     maxrss = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
-    # Linux reports KB, macOS/BSD report bytes.
-    if platform.system() == "Linux":
-        return maxrss * 1024
-    return maxrss
+    return maxrss * 1024
 
 
 @dataclass(frozen=True)

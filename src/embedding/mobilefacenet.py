@@ -8,27 +8,15 @@ from typing import Optional
 import numpy as np
 
 def _load_interpreter_class():
-    """Import TFLite Interpreter lazily so importing this module does not require a runtime."""
-    try:  # Legacy standalone runtime (tflite-runtime <=2.14).
-        from tflite_runtime.interpreter import Interpreter  # type: ignore
-
-        return Interpreter
-    except ImportError:
-        pass
-    try:  # ai_edge_litert — Google's maintained successor to tflite-runtime (Linux / RPi).
+    """Import the Raspberry Pi TFLite Interpreter lazily."""
+    try:
         from ai_edge_litert.interpreter import Interpreter  # type: ignore
 
         return Interpreter
-    except ImportError:
-        pass
-    try:  # Full TensorFlow fallback (macOS / x86 dev machines).
-        import tensorflow as tf  # type: ignore
-
-        return tf.lite.Interpreter
     except Exception as exc:  # pragma: no cover
         raise RuntimeError(
-            "TensorFlow Lite runtime is required. "
-            "Install `ai_edge_litert` (Linux/RPi) or `tensorflow` (macOS)."
+            "ai_edge_litert is required for MobileFaceNet on Raspberry Pi 5. "
+            "Install it in the active venv with `pip install -r requirements.txt`."
         ) from exc
 
 

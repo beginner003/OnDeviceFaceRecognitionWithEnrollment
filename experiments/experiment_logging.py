@@ -29,7 +29,7 @@ def setup_experiment_logging(
     metrics.handlers.clear()
     metrics.setLevel(logging.INFO)
     metrics.propagate = False
-    fh = logging.FileHandler(metrics_path, encoding="utf-8")
+    fh = logging.FileHandler(metrics_path, mode="w", encoding="utf-8")
     fh.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
     metrics.addHandler(fh)
 
