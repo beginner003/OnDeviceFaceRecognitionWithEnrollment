@@ -118,6 +118,51 @@ Useful for a single ranking slide; treats set1–set3 equally (different class c
 
 ---
 
+## Table 3B — Set 4 / Set 5 extension (latest consolidated logs)
+
+These values are from each file's `SET SUMMARY` (mean of 3 trials) and are included as an extension beyond the original set1–set3 comparison.
+
+| Set | Method | Avg accuracy ↑ | Avg forgetting ↓ | Backward transfer | Mean run time / trial (s) |
+|-----|--------|----------------|------------------|-------------------|---------------------------|
+| Set 4 | Naive classifier | 5.25% | 84.75% | −0.869 | 162.220 |
+| Set 4 | NCM | 94.33% | 2.00% | −0.021 | 141.044 |
+| Set 4 | LwF | 6.75% | 84.33% | −0.865 | 151.499 |
+| Set 4 | Replay | 94.58% | 5.08% | −0.052 | 186.111 |
+| Set 4 | Replay + LwF | 92.42% | 6.92% | −0.071 | 211.817 |
+| Set 4 | Synthetic replay | **97.50%** | **1.17%** | −0.012 | 334.842 |
+| Set 5 | Naive classifier | 3.40% | 88.60% | −0.904 | 224.605 |
+| Set 5 | NCM | 92.00% | 2.47% | −0.025 | 181.416 |
+| Set 5 | LwF | 5.53% | 87.73% | −0.895 | 203.826 |
+| Set 5 | Replay | 92.67% | 6.73% | −0.069 | 259.474 |
+| Set 5 | Replay + LwF | 89.93% | 9.20% | −0.094 | 293.393 |
+| Set 5 | Synthetic replay | **96.27%** | **1.93%** | −0.020 | 509.907 |
+
+### Table 3C — Unknown identity (Set 4 / Set 5, separate)
+
+Means of the three per-trial totals (`unknown_rejection_accuracy` and `unknown_false_accept_rate`) from each consolidated set log.
+
+| Set | Method | Unknown rejection accuracy ↑ | Unknown false accept rate ↓ |
+|-----|--------|------------------------------|-----------------------------|
+| Set 4 | Naive classifier | 0.67% | 99.33% |
+| Set 4 | NCM | 0.33% | 99.67% |
+| Set 4 | LwF | 0.33% | 99.67% |
+| Set 4 | Replay | **46.00%** | **54.00%** |
+| Set 4 | Replay + LwF | 44.67% | 55.33% |
+| Set 4 | Synthetic replay | 41.33% | 58.67% |
+| Set 5 | Naive classifier | 1.00% | 99.00% |
+| Set 5 | NCM | 1.00% | 99.00% |
+| Set 5 | LwF | 0.00% | 100.00% |
+| Set 5 | Replay | **38.33%** | **61.67%** |
+| Set 5 | Replay + LwF | 37.00% | 63.00% |
+| Set 5 | Synthetic replay | 36.33% | 63.67% |
+
+Interpretation (extension):
+- Set 4/5 confirm the no-replay methods (Naive/LwF) collapse on known-ID retention and near-zero unknown-ID rejection.
+- Synthetic replay keeps top known-ID accuracy at larger scale, but unknown-ID rejection remains below replay-family levels in these runs.
+- Replay and Replay+LwF give the strongest unknown-ID rejection on Set 4/5 while staying high on known-ID accuracy.
+
+---
+
 ## Table 4 — Average registration time per new face (seconds)
 
 Mean **avg_elapsed** from `Registration summary | … avg_elapsed=… s/face` in each trial, then averaged across the **3 trials** per set. Includes classifier training / replay / distillation time for that face where applicable (not embedding extraction, which is cached separately).
