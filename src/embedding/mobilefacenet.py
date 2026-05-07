@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
+
 
 def _load_interpreter_class():
     """Import the Raspberry Pi TFLite Interpreter lazily."""
@@ -30,6 +32,7 @@ class MobileFaceNetEmbedder:
         self._input_index: Optional[int] = None
         self._output_index: Optional[int] = None
         self._input_dtype = np.float32
+        self._invoke_lock = threading.Lock()
 
         self._init_interpreter()
 
@@ -71,9 +74,19 @@ class MobileFaceNetEmbedder:
         batched = aligned_rgb_normalized.astype(np.float32, copy=False)[None, ...]
         input_tensor = self._cast_input(batched)
 
-        self._interpreter.set_tensor(self._input_index, input_tensor)
-        self._interpreter.invoke()
-        output = self._interpreter.get_tensor(self._output_index)
+        try:
+            with self._invoke_lock:
+                self._interpreter.set_tensor(self._input_index, input_tensor)
+                self._interpreter.invoke()
+                # Copy while lock is held to avoid any shared-memory lifetime overlap
+                # with subsequent invocations from another thread.
+                output = np.array(
+                    self._interpreter.get_tensor(self._output_index),
+                    dtype=np.float32,
+                    copy=True,
+                )
+        except Exception:
+            raise
 
         emb = np.asarray(output, dtype=np.float32).reshape(-1)
         norm = np.linalg.norm(emb) + 1e-12

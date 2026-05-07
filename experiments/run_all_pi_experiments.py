@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import os
 import platform
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Sequence
@@ -20,7 +22,15 @@ EXPERIMENT_SCRIPTS = (
     Path("experiments/lwf_classifier/run.py"),
     Path("experiments/synthetic_replay_classifier/run.py"),
 )
-SET_NAMES = ("set1", "set2", "set3")
+SET_NAMES = tuple(f"set{i}" for i in range(1, 11))
+METHOD_CONFIDENCE_THRESHOLDS: dict[Path, float | None] = {
+    Path("experiments/baseline_classifier/run.py"): 0.3,
+    Path("experiments/baseline_ncm/run.py"): None,  # NCM runner uses internal 0.5.
+    Path("experiments/replay_classifier/run.py"): 0.3,
+    Path("experiments/replay_lwf_classifier/run.py"): 0.3,
+    Path("experiments/lwf_classifier/run.py"): 0.3,
+    Path("experiments/synthetic_replay_classifier/run.py"): 0.5,
+}
 
 
 def _repo_root() -> Path:
@@ -37,12 +47,29 @@ def _require_pi_linux() -> None:
         )
 
 
-def _run_command(cmd: Sequence[str], *, repo_root: Path, log_path: Path) -> int:
+def _run_command(
+    cmd: Sequence[str],
+    *,
+    repo_root: Path,
+    log_path: Path,
+    log_lock: threading.Lock | None = None,
+    stream_prefix: str = "",
+) -> int:
+    def _log_line(log_handle, message: str) -> None:
+        if log_lock is not None:
+            with log_lock:
+                log_handle.write(message)
+                log_handle.flush()
+        else:
+            log_handle.write(message)
+            log_handle.flush()
+
     started_at = time.perf_counter()
     with log_path.open("a", encoding="utf-8") as log:
-        log.write("\n" + "=" * 80 + "\n")
-        log.write(f"COMMAND: {' '.join(cmd)}\n")
-        log.flush()
+        _log_line(log, "\n" + "=" * 80 + "\n")
+        if stream_prefix:
+            _log_line(log, f"{stream_prefix} ")
+        _log_line(log, f"COMMAND: {' '.join(cmd)}\n")
 
         env = dict(os.environ)
         env["PYTHONPATH"] = str(repo_root)
@@ -57,12 +84,18 @@ def _run_command(cmd: Sequence[str], *, repo_root: Path, log_path: Path) -> int:
         )
         assert proc.stdout is not None
         for line in proc.stdout:
-            print(line, end="")
-            log.write(line)
+            prefixed = f"{stream_prefix} {line}" if stream_prefix else line
+            print(prefixed, end="")
+            _log_line(log, prefixed)
         exit_code = proc.wait()
         elapsed = time.perf_counter() - started_at
-        log.write(f"EXIT_CODE: {exit_code}\n")
-        log.write(f"ELAPSED_SECONDS: {elapsed:.3f}\n")
+        _log_line(log, f"{stream_prefix} EXIT_CODE: {exit_code}\n" if stream_prefix else f"EXIT_CODE: {exit_code}\n")
+        _log_line(
+            log,
+            f"{stream_prefix} ELAPSED_SECONDS: {elapsed:.3f}\n"
+            if stream_prefix
+            else f"ELAPSED_SECONDS: {elapsed:.3f}\n",
+        )
         return int(exit_code)
 
 
@@ -81,6 +114,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         help=(
             "Run each experiment script once with its default supertask JSON (legacy behavior). "
             "By default this script runs full set-trial suites via experiments/run_set_trials.py."
+        ),
+    )
+    parser.add_argument(
+        "--start-set",
+        type=int,
+        default=1,
+        help="First set index to run in suite mode (default: 1).",
+    )
+    parser.add_argument(
+        "--end-set",
+        type=int,
+        default=len(SET_NAMES),
+        help="Last set index to run in suite mode (default: 10).",
+    )
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=len(EXPERIMENT_SCRIPTS),
+        help=(
+            "Maximum concurrent methods per set in suite mode "
+            f"(default: {len(EXPERIMENT_SCRIPTS)})."
         ),
     )
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -102,29 +156,73 @@ def main(argv: Sequence[str] | None = None) -> int:
             cmd = [sys.executable, str(script), "--reset-workspace"]
             if not args.reuse_embeddings:
                 cmd.append("--overwrite-embeddings")
+            threshold = METHOD_CONFIDENCE_THRESHOLDS.get(script)
+            if threshold is not None:
+                cmd.extend(["--confidence-threshold", str(threshold)])
             exit_code = _run_command(cmd, repo_root=repo_root, log_path=run_log)
             if exit_code != 0:
                 return exit_code
         return 0
 
+    if (
+        int(args.start_set) < 1
+        or int(args.end_set) < int(args.start_set)
+        or int(args.end_set) > len(SET_NAMES)
+    ):
+        raise ValueError(
+            f"--start-set and --end-set must satisfy 1 <= start <= end <= {len(SET_NAMES)}."
+        )
+    selected_sets = tuple(f"set{i}" for i in range(int(args.start_set), int(args.end_set) + 1))
+    if int(args.max_workers) < 1:
+        raise ValueError("--max-workers must be >= 1.")
+
     suite_runner = Path("experiments/run_set_trials.py")
-    for script in EXPERIMENT_SCRIPTS:
-        for set_name in SET_NAMES:
-            cmd = [
-                sys.executable,
-                str(suite_runner),
-                "--runner",
-                str(script),
-                "--set-name",
-                set_name,
-                "--python",
-                sys.executable,
-            ]
-            if args.reuse_embeddings:
-                cmd.append("--reuse-embeddings")
-            exit_code = _run_command(cmd, repo_root=repo_root, log_path=run_log)
-            if exit_code != 0:
-                return exit_code
+    log_lock = threading.Lock()
+    worker_count = min(int(args.max_workers), len(EXPERIMENT_SCRIPTS))
+    for set_name in selected_sets:
+        futures: dict[concurrent.futures.Future[int], Path] = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
+            for script in EXPERIMENT_SCRIPTS:
+                method_name = script.parent.name
+                stream_prefix = f"[{set_name}|{method_name}]"
+                cmd = [
+                    sys.executable,
+                    str(suite_runner),
+                    "--runner",
+                    str(script),
+                    "--set-name",
+                    set_name,
+                    "--python",
+                    sys.executable,
+                ]
+                threshold = METHOD_CONFIDENCE_THRESHOLDS.get(script)
+                if threshold is not None:
+                    cmd.extend(["--confidence-threshold", str(threshold)])
+                if args.reuse_embeddings:
+                    cmd.append("--reuse-embeddings")
+                future = executor.submit(
+                    _run_command,
+                    cmd,
+                    repo_root=repo_root,
+                    log_path=run_log,
+                    log_lock=log_lock,
+                    stream_prefix=stream_prefix,
+                )
+                futures[future] = script
+
+            for future in concurrent.futures.as_completed(futures):
+                exit_code = future.result()
+                if exit_code != 0:
+                    script = futures[future]
+                    method_name = script.parent.name
+                    with run_log.open("a", encoding="utf-8") as log:
+                        with log_lock:
+                            log.write(
+                                f"[{set_name}|{method_name}] FAILURE detected; "
+                                "finishing current set before exit.\n"
+                            )
+                            log.flush()
+                    return exit_code
 
     return 0
 

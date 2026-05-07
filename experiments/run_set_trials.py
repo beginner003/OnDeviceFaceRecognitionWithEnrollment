@@ -80,9 +80,8 @@ def main() -> int:
     parser.add_argument(
         "--set-name",
         type=str,
-        required=True,
-        choices=("set1", "set2", "set3"),
-        help="Set name to run.",
+        default="set1",
+        help="Set name to run, e.g. set1 .. set10 (default: set1).",
     )
     parser.add_argument(
         "--python",
@@ -102,7 +101,18 @@ def main() -> int:
         action="store_true",
         help="Reuse cached embeddings (skip --overwrite-embeddings).",
     )
+    parser.add_argument(
+        "--confidence-threshold",
+        type=float,
+        default=None,
+        help=(
+            "Optional recognition confidence threshold forwarded to runner "
+            "(used for unknown-identity rejection tuning)."
+        ),
+    )
     args = parser.parse_args()
+    if not re.fullmatch(r"set\d+", str(args.set_name)):
+        raise ValueError(f"Invalid --set-name {args.set_name!r}; expected pattern 'setN'.")
 
     runner = Path(args.runner).expanduser().resolve()
     if not runner.is_file():
@@ -154,6 +164,8 @@ def main() -> int:
         ]
         if experiment_root is not None:
             cmd.extend(["--experiment-root", str(experiment_root)])
+        if args.confidence_threshold is not None:
+            cmd.extend(["--confidence-threshold", str(args.confidence_threshold)])
         if not args.reuse_embeddings:
             cmd.append("--overwrite-embeddings")
 

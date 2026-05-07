@@ -1,0 +1,160 @@
+{
+  "name": "supertask_set5_trial3",
+  "source": "experiments/generate_supertask_suite.py",
+  "scenario": {
+    "type": "on_device_evaluation",
+    "task_grouping": "set5_trial3"
+  },
+  "set": "set5",
+  "trial": 3,
+  "tasks": {
+    "task0": [
+      "n000009",
+      "n000082",
+      "n000106",
+      "n000178",
+      "n000284"
+    ],
+    "task1": [
+      "n000394"
+    ],
+    "task2": [
+      "n000397"
+    ],
+    "task3": [
+      "n000398"
+    ],
+    "task4": [
+      "n000400"
+    ],
+    "task5": [
+      "n000408"
+    ],
+    "task6": [
+      "n000416"
+    ],
+    "task7": [
+      "n000417"
+    ],
+    "task8": [
+      "n000418"
+    ],
+    "task9": [
+      "n000422"
+    ],
+    "task10": [
+      "n000423"
+    ],
+    "task11": [
+      "n000428"
+    ],
+    "task12": [
+      "n000436"
+    ],
+    "task13": [
+      "n000437"
+    ],
+    "task14": [
+      "n000438"
+    ],
+    "task15": [
+      "n000444"
+    ],
+    "task16": [
+      "n000447"
+    ],
+    "task17": [
+      "n000455"
+    ],
+    "task18": [
+      "n000456"
+    ],
+    "task19": [
+      "n000457"
+    ],
+    "task20": [
+      "n000459"
+    ],
+    "task21": [
+      "n000462"
+    ],
+    "task22": [
+      "n000464"
+    ],
+    "task23": [
+      "n000465"
+    ],
+    "task24": [
+      "n000467"
+    ],
+    "task25": [
+      "n000470"
+    ],
+    "task26": [
+      "n000479"
+    ],
+    "task27": [
+      "n000483"
+    ],
+    "task28": [
+      "n000486"
+    ],
+    "task29": [
+      "n000487"
+    ],
+    "task30": [
+      "n000489"
+    ],
+    "task31": [
+      "n000494"
+    ],
+    "task32": [
+      "n000498"
+    ],
+    "task33": [
+      "n000499"
+    ],
+    "task34": [
+      "n000501"
+    ],
+    "task35": [
+      "n000502"
+    ],
+    "task36": [
+      "n000527"
+    ],
+    "task37": [
+      "n000659"
+    ],
+    "task38": [
+      "n000740"
+    ],
+    "task39": [
+      "n000746"
+    ],
+    "task40": [
+      "n000774"
+    ],
+    "task41": [
+      "n000785"
+    ],
+    "task42": [
+      "n000912"
+    ],
+    "task43": [
+      "n001125"
+    ],
+    "task44": [
+      "n001242"
+    ],
+    "task45": [
+      "n001256"
+    ]
+  },
+  "dataset_root": "data/val",
+  "constraints": {
+    "train_images_per_identity": 50,
+    "test_images_per_identity": 10,
+    "test_start_index": 10
+  }
+}

@@ -1,0 +1,130 @@
+{
+  "name": "supertask_set4_trial3",
+  "source": "experiments/generate_supertask_suite.py",
+  "scenario": {
+    "type": "on_device_evaluation",
+    "task_grouping": "set4_trial3"
+  },
+  "set": "set4",
+  "trial": 3,
+  "tasks": {
+    "task0": [
+      "n000040",
+      "n000259",
+      "n000393",
+      "n000396",
+      "n000398"
+    ],
+    "task1": [
+      "n000407"
+    ],
+    "task2": [
+      "n000411"
+    ],
+    "task3": [
+      "n000417"
+    ],
+    "task4": [
+      "n000418"
+    ],
+    "task5": [
+      "n000420"
+    ],
+    "task6": [
+      "n000422"
+    ],
+    "task7": [
+      "n000425"
+    ],
+    "task8": [
+      "n000431"
+    ],
+    "task9": [
+      "n000433"
+    ],
+    "task10": [
+      "n000434"
+    ],
+    "task11": [
+      "n000436"
+    ],
+    "task12": [
+      "n000450"
+    ],
+    "task13": [
+      "n000451"
+    ],
+    "task14": [
+      "n000457"
+    ],
+    "task15": [
+      "n000462"
+    ],
+    "task16": [
+      "n000469"
+    ],
+    "task17": [
+      "n000472"
+    ],
+    "task18": [
+      "n000474"
+    ],
+    "task19": [
+      "n000476"
+    ],
+    "task20": [
+      "n000486"
+    ],
+    "task21": [
+      "n000490"
+    ],
+    "task22": [
+      "n000495"
+    ],
+    "task23": [
+      "n000499"
+    ],
+    "task24": [
+      "n000527"
+    ],
+    "task25": [
+      "n000624"
+    ],
+    "task26": [
+      "n000658"
+    ],
+    "task27": [
+      "n000659"
+    ],
+    "task28": [
+      "n000785"
+    ],
+    "task29": [
+      "n000928"
+    ],
+    "task30": [
+      "n000958"
+    ],
+    "task31": [
+      "n000998"
+    ],
+    "task32": [
+      "n001153"
+    ],
+    "task33": [
+      "n001197"
+    ],
+    "task34": [
+      "n001256"
+    ],
+    "task35": [
+      "n001296"
+    ]
+  },
+  "dataset_root": "data/val",
+  "constraints": {
+    "train_images_per_identity": 50,
+    "test_images_per_identity": 10,
+    "test_start_index": 10
+  }
+}

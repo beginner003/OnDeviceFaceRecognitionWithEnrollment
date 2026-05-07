@@ -62,6 +62,13 @@ flowchart TD
 4. For registration mode, capture helpers collect embeddings across center/left/right poses, then call `FaceRecognitionSystem.register()`.
 5. `register()` routes to selected `RegistrationStrategy` (naive/replay/LwF/synthetic), updates memory stores, and persists workspace state.
 
+### Registration memory (RAM scope during `/register`)
+
+- **What accumulates:** Only **accepted** face embeddings (128-d `float32` vectors), not full camera frames. The background worker in `src/ui/app.py` holds them in `embedding_session`; `src/ui/registration_capture.py` appends one vector per accepted pose frame into a per-phase `bucket`, then the worker extends the session list.
+- **Dedup overhead:** `_near_duplicate()` temporarily stacks existing bucket embeddings as `float64` to compare cosine similarity to the candidate; that array is short-lived (function-local).
+- **Batch then drop session buffers:** After all poses succeed, the worker builds `emb_mat = np.stack(embedding_session, ...)`, calls `embedding_session.clear()`, passes `emb_mat` into `FaceRecognitionSystem.register()`, then `del emb_mat` and clears the list again in `finally`. That matches the UI message that session vectors are cleared from RAM after enroll—the **registration batch** is explicitly released.
+- **What stays after `register()`:** `FaceRecognitionSystem` keeps what the chosen strategy needs (e.g. exemplars in `ExemplarStore`, optional Gaussian stats in `GaussianStore`, classifier weights in RAM) and persists workspace artifacts via `save()` under `workspace/` (`src/system.py`). Synthetic replay fits the Gaussian from **all** session embeddings before selection semantics apply elsewhere.
+
 ## 3) Where Each Goal Is Reflected in Code
 
 | End Goal | Current Implementation Evidence | Status |

@@ -27,6 +27,7 @@ from experiments.registration_metrics import (
     log_registration_summary,
     take_storage_snapshot,
 )
+from experiments.unknown_identity_eval import evaluate_unknown_identity_rejection
 from src.system import FaceRecognitionSystem, SystemConfig
 
 
@@ -81,6 +82,18 @@ def main() -> None:
         "--reset-workspace",
         action="store_true",
         help="Delete the workspace directory before running.",
+    )
+    parser.add_argument(
+        "--unknown-identities-count",
+        type=int,
+        default=10,
+        help="Number of unseen identities to evaluate as unknown (0 disables this test).",
+    )
+    parser.add_argument(
+        "--unknown-seed",
+        type=int,
+        default=20260507,
+        help="RNG seed used when sampling unknown identities from data/val.",
     )
     args = parser.parse_args()
 
@@ -222,6 +235,17 @@ def main() -> None:
             registered_identities=identity_names,
             logger=metrics,
         )
+    evaluate_unknown_identity_rejection(
+        system=system,
+        supertask_path=supertask_json,
+        embeddings_root=embeddings_root,
+        known_identities=all_identities,
+        unknown_count=int(args.unknown_identities_count),
+        seed=int(args.unknown_seed),
+        overwrite_embeddings=bool(args.overwrite_embeddings),
+        metrics_logger=metrics,
+        progress_logger=progress,
+    )
 
     mem_run_end = snapshot_peak_memory()
     log_registration_summary(metrics=metrics, events=registration_events)

@@ -1,4 +1,4 @@
-"""Generate Set1/Set2/Set3 multi-trial supertask definitions."""
+"""Generate Set1..Set10 multi-trial supertask definitions."""
 
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ def _write_supertask(path: Path, payload: dict) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Generate Set1/Set2/Set3 supertask trial JSONs.")
+    parser = argparse.ArgumentParser(description="Generate Set1..Set10 supertask trial JSONs.")
     parser.add_argument("--output-dir", type=str, default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument("--dataset-root", type=str, default=str(DEFAULT_DATASET_ROOT))
     parser.add_argument("--seed", type=int, default=20260505)
@@ -77,6 +77,13 @@ def main() -> int:
         {"set_name": "set1", "total_faces": 10, "chunk_sizes": [1, 1, 1, 2]},
         {"set_name": "set2", "total_faces": 20, "chunk_sizes": [1] * 15},
         {"set_name": "set3", "total_faces": 30, "chunk_sizes": [1] * 25},
+        {"set_name": "set4", "total_faces": 40, "chunk_sizes": [1] * 35},
+        {"set_name": "set5", "total_faces": 50, "chunk_sizes": [1] * 45},
+        {"set_name": "set6", "total_faces": 60, "chunk_sizes": [1] * 55},
+        {"set_name": "set7", "total_faces": 70, "chunk_sizes": [1] * 65},
+        {"set_name": "set8", "total_faces": 80, "chunk_sizes": [1] * 75},
+        {"set_name": "set9", "total_faces": 90, "chunk_sizes": [1] * 85},
+        {"set_name": "set10", "total_faces": 100, "chunk_sizes": [1] * 95},
     ]
 
     for spec in set_specs:

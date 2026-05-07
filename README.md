@@ -31,6 +31,17 @@ PY
 ```
 
 ## Launch the UI
+Import the RealSense Library
+```bash
+export LD_LIBRARY_PATH=/home/comp4901d/librealsense/build/Release${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+export PYTHONPATH=/home/comp4901d/librealsense/wrappers/python${PYTHONPATH:+:$PYTHONPATH}
+export PYTHONPATH=/home/comp4901d/OnDeviceFaceRecognitionWithEnrollment:${PYTHONPATH}
+```
+
+Quick check:
+```bash
+python3.11 -c "import pyrealsense2 as rs; print('OK', rs)"
+```
 
 Run from the repository root on the Pi:
 
@@ -108,3 +119,9 @@ PYTHONPATH=. python -m pytest -m integration
 Notes:
 - Integration tests require Pi runtime dependencies, TFLite models under `src/models/`, and real image fixtures.
 - Hardware UI validation requires the RealSense camera on the Raspberry Pi 5.
+
+
+Running Experiments
+```bash
+cd /home/comp4901d/OnDeviceFaceRecognitionWithEnrollment && export PYTHONPATH=. && for runner in experiments/replay_classifier/run.py experiments/replay_lwf_classifier/run.py experiments/lwf_classifier/run.py experiments/synthetic_replay_classifier/run.py; do for set_idx in {4..10}; do python experiments/run_set_trials.py --runner "$runner" --set-name "set${set_idx}" --python "$(which python)"; done; done
+```

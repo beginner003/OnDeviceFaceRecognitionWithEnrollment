@@ -35,9 +35,9 @@ PYTHONPATH=. python experiments/run_all_pi_experiments.py --reuse-embeddings
 
 ---
 
-## Generate multi-trial supertask suite (Set1/Set2/Set3)
+## Generate multi-trial supertask suite (Set1..Set10)
 
-Create the 9 requested supertasks (3 trials each for set1/set2/set3):
+Create the full supertask suite (3 trials each for set1..set10):
 
 ```bash
 PYTHONPATH=. python experiments/generate_supertask_suite.py
@@ -45,10 +45,16 @@ PYTHONPATH=. python experiments/generate_supertask_suite.py
 
 Generated files:
 - `data/supertask_suite/set1_trial1.json` (original 8.2 split)
-- `data/supertask_suite/set1_trial2.json`
-- `data/supertask_suite/set1_trial3.json`
-- `data/supertask_suite/set2_trial1.json` .. `set2_trial3.json` (5 initial + incremental to 20)
-- `data/supertask_suite/set3_trial1.json` .. `set3_trial3.json` (5 initial + incremental to 30)
+- `data/supertask_suite/set1_trial2.json` .. `set1_trial3.json` (10 faces total)
+- `data/supertask_suite/set2_trial1.json` .. `set2_trial3.json` (20 faces total)
+- `data/supertask_suite/set3_trial1.json` .. `set3_trial3.json` (30 faces total)
+- `data/supertask_suite/set4_trial1.json` .. `set4_trial3.json` (40 faces total)
+- `data/supertask_suite/set5_trial1.json` .. `set5_trial3.json` (50 faces total)
+- `data/supertask_suite/set6_trial1.json` .. `set6_trial3.json` (60 faces total)
+- `data/supertask_suite/set7_trial1.json` .. `set7_trial3.json` (70 faces total)
+- `data/supertask_suite/set8_trial1.json` .. `set8_trial3.json` (80 faces total)
+- `data/supertask_suite/set9_trial1.json` .. `set9_trial3.json` (90 faces total)
+- `data/supertask_suite/set10_trial1.json` .. `set10_trial3.json` (100 faces total)
 
 Compact supertask JSONs in this suite define `tasks` + split constraints, and are expanded automatically at embedding time.
 
@@ -56,19 +62,21 @@ Compact supertask JSONs in this suite define `tasks` + split constraints, and ar
 
 ## One consolidated log per set (3 trials + average)
 
-Run one experiment method for an entire set and produce one log file that includes, for each of the three trials, the **full** `logs/evaluation.log` content from that run (configuration, per-face registration lines, per-task timing, per-task accuracy table, forgetting, confusion matrix, registration/storage summary, peak memory, etc.). After the third trial, a **SET SUMMARY** section lists per-trial headline metrics and the **mean** across trials.
+Run one experiment method for an entire set and produce one log file that includes, for each of the three trials, the **full** `logs/evaluation.log` content from that run (configuration, per-face registration lines, per-task timing, per-task accuracy table, forgetting, confusion matrix, unknown-identity rejection section, registration/storage summary, peak memory, etc.). After the third trial, a **SET SUMMARY** section lists per-trial headline metrics and the **mean** across trials.
 
 ```bash
 PYTHONPATH=. python experiments/run_set_trials.py \
-  --runner experiments/lwf_classifier/run.py \
-  --set-name set1
+  --runner experiments/lwf_classifier/run.py
 ```
 
+Default behavior runs `set1` (all 3 trials). To run a different set, pass `--set-name setN`.
+
 Output log path (banner lines use the same `%(asctime)s | INFO |` style as `evaluation.log`):
-- `experiments/<method>/logs/sets/set1.log` (or `set2.log`, `set3.log`)
+- `experiments/<method>/logs/sets/setN.log` (e.g. `set4.log`, `set10.log`)
 
 Options:
 - add `--reuse-embeddings` to skip `--overwrite-embeddings`,
+- add `--confidence-threshold <float>` to override the runner threshold (for unknown-ID rejection tuning),
 - add `--experiment-root <path>` if you want a custom experiment root.
 
 ---
