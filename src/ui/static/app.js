@@ -16,6 +16,7 @@
   const alignedFace = document.getElementById("alignedFace");
 
   let mode = "recognition";
+  const regLog = (...args) => console.debug("[register]", ...args);
 
   function setMode(next) {
     mode = next === "register" ? "register" : "recognition";
@@ -199,47 +200,10 @@
     const name = document.getElementById("regName").value.trim();
     const n_frames = Number(document.getElementById("regFrames").value);
 
-    const es = new EventSource("/register/stream");
-    es.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        regMsg.textContent = data.message || data.phase || "";
-        if (data.phase === "capturing" && data.target) {
-          const p = Math.round((100 * (data.current || 0)) / data.target);
-          regBar.style.width = `${p}%`;
-        }
-        if (data.phase === "training") {
-          regBar.style.width = "100%";
-        }
-        if (data.phase === "done") {
-          regMsg.textContent = `Done: ${data.identity} · ${data.elapsed_s}s · ${data.total_identities} total · back to recognition`;
-          es.close();
-          setMode("recognition");
-          regProgress.hidden = true;
-          refreshIdentities();
-          loadSettings();
-          pollStatus();
-          btnRegister.disabled = false;
-        }
-        if (data.phase === "error") {
-          regMsg.textContent = data.message || "Error";
-          regMsg.classList.add("err");
-          es.close();
-          setMode("recognition");
-          regProgress.hidden = true;
-          btnRegister.disabled = false;
-        }
-      } catch {
-        /* ignore */
-      }
-    };
-    es.onerror = () => {
-      es.close();
-      btnRegister.disabled = false;
-    };
-
     btnRegister.disabled = true;
+    let es = null;
     try {
+      regLog("submit", { name, n_frames });
       const r = await fetch("/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -247,12 +211,56 @@
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) {
-        es.close();
         const d = j.detail;
         throw new Error(typeof d === "string" ? d : JSON.stringify(d || r.statusText));
       }
+      const startSeq = Number(j.start_seq ?? -1);
+      regLog("register accepted", { startSeq });
+
+      es = new EventSource(`/register/stream?after_seq=${encodeURIComponent(startSeq)}`);
+      es.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          regLog("event", data);
+          regMsg.textContent = data.message || data.phase || "";
+          if (data.phase === "capturing" && data.target) {
+            const p = Math.round((100 * (data.current || 0)) / data.target);
+            regBar.style.width = `${p}%`;
+          }
+          if (data.phase === "training") {
+            regBar.style.width = "100%";
+          }
+          if (data.phase === "done") {
+            regMsg.textContent = `Done: ${data.identity} · ${data.elapsed_s}s · ${data.total_identities} total · back to recognition`;
+            es.close();
+            setMode("recognition");
+            regProgress.hidden = true;
+            refreshIdentities();
+            loadSettings();
+            pollStatus();
+            btnRegister.disabled = false;
+          }
+          if (data.phase === "error") {
+            regMsg.textContent = data.message || "Error";
+            regMsg.classList.add("err");
+            es.close();
+            regProgress.hidden = true;
+            btnRegister.disabled = false;
+          }
+        } catch (err) {
+          regLog("event parse failure", err);
+        }
+      };
+      es.onerror = () => {
+        regLog("stream error");
+        es.close();
+        regMsg.textContent = "Registration stream disconnected. Check backend logs and retry.";
+        regMsg.classList.add("err");
+        btnRegister.disabled = false;
+      };
     } catch (e) {
-      es.close();
+      if (es) es.close();
+      regLog("submit failed", e);
       regMsg.textContent = String(e.message || e);
       regMsg.classList.add("err");
       btnRegister.disabled = false;

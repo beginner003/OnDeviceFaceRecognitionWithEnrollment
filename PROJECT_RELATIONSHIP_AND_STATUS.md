@@ -29,7 +29,8 @@ flowchart TD
 
     REG --> NAIVE["Naive FT\n`src/continual/naive_ft.py`"]
     REG --> REPLAY["Exemplar Replay\n`src/continual/exemplar_replay.py`"]
-    REG --> LWF["LwF (no replay alias via replay_lwf)\n`src/continual/lwf.py`\n`src/continual/replay_lwf.py`"]
+    REG --> LWF["LwF (no replay)\n`src/continual/lwf.py`"]
+    REG --> RLWF["Replay + LwF\n`src/continual/replay_lwf.py`"]
     REG --> SYN["Synthetic Replay\n`src/continual/synthetic_replay.py`"]
 
     SEL --> HERD["Herding\n`src/memory/herding.py`"]

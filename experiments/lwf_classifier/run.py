@@ -35,6 +35,12 @@ from experiments.eval_utils import (
 )
 from experiments.experiment_logging import setup_experiment_logging
 from experiments.memory_metrics import peak_delta_mb, snapshot_peak_memory
+from experiments.registration_metrics import (
+    RegistrationEvent,
+    log_registration_event,
+    log_registration_summary,
+    take_storage_snapshot,
+)
 from src.continual.lwf import LwFConfig, LwFStrategy
 from src.memory.herding import HerdingSelector
 from src.recognition.classifier_based import ClassifierRecognizer
@@ -230,6 +236,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     per_task_results: List[Dict[str, float]] = []
     final_predictions = None
     registered: List[str] = []
+    registration_events: List[RegistrationEvent] = []
     rng = np.random.default_rng(SEED)
 
     for task in task_order:
@@ -242,7 +249,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                 idx = rng.choice(emb.shape[0], int(args.max_new_exemplars), replace=False)
                 emb = emb[idx]
             progress.info("Registering %s (%d embeddings)", ident, emb.shape[0])
-            system.register(ident, emb)
+            storage_before = take_storage_snapshot(workspace_dir)
+            reg_result = system.register(ident, emb)
+            storage_after = take_storage_snapshot(workspace_dir)
+            registration_events.append(
+                log_registration_event(
+                    metrics=metrics,
+                    task_name=task.name,
+                    result=reg_result,
+                    before=storage_before,
+                    after=storage_after,
+                )
+            )
             registered.append(ident)
         registration_seconds = time.perf_counter() - registration_started_at
 
@@ -292,6 +310,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
     mem_run_end = snapshot_peak_memory()
+    log_registration_summary(metrics=metrics, events=registration_events)
     metrics.info(
         "Overall peak memory: %.2f MB (run delta +%.2f MB)",
         mem_run_end.peak_rss_mb,

@@ -13,6 +13,7 @@ from src.continual.classifier import CosineLinear
 from src.continual.exemplar_replay import ExemplarReplayConfig, incremental_train_replay
 from src.continual.lwf import LwFConfig, incremental_train_lwf
 from src.continual.naive_ft import NaiveFTConfig, incremental_train_naive
+from src.continual.replay_lwf import ReplayLwFConfig, incremental_train_replay_lwf
 from src.continual.synthetic_replay import SyntheticReplayConfig, incremental_train_synthetic_replay
 from src.memory.exemplar_store import ExemplarStore
 
@@ -251,6 +252,85 @@ def test_lwf_distillation_changes_old_class_optimization() -> None:
     assert with_distill.out_features == 3
     assert no_distill.out_features == 3
     assert not torch.allclose(no_distill.weight[:2], with_distill.weight[:2], atol=1e-5)
+
+
+def test_replay_lwf_second_class_output_shape(tmp_path) -> None:
+    rng = np.random.default_rng(70)
+    emb_a = _make_class_embeddings(rng, direction_seed=0)
+    emb_b = _make_class_embeddings(rng, direction_seed=100)
+
+    clf = CosineLinear(in_features=128, out_features=0)
+    store = ExemplarStore(tmp_path / "exemplars")
+    cfg = ReplayLwFConfig(epochs=5, batch_size=8, lr=0.03, replay_per_identity=5)
+
+    store.upsert_class("alice", emb_a)
+    incremental_train_replay_lwf(clf, store, emb_a, "alice", config=cfg, device="cpu")
+    assert clf.out_features == 1
+    setattr(clf, "_class_names", ["alice"])
+
+    store.upsert_class("bob", emb_b)
+    incremental_train_replay_lwf(clf, store, emb_b, "bob", config=cfg, device="cpu")
+
+    assert clf.out_features == 2
+    logits = clf(torch.from_numpy(emb_b.astype(np.float32)))
+    assert logits.shape == (8, 2)
+
+
+def test_replay_lwf_retains_old_class_better_than_no_replay_lwf(tmp_path) -> None:
+    rng = np.random.default_rng(80)
+    emb_a = _make_class_embeddings(rng, direction_seed=1, n=10)
+    emb_b = _make_class_embeddings(rng, direction_seed=999, n=10)
+
+    no_replay = CosineLinear(in_features=128, out_features=0)
+    lwf_cfg = LwFConfig(epochs=20, batch_size=10, lr=0.05, temperature=2.0, distill_weight=1.0)
+    incremental_train_lwf(no_replay, emb_a, config=lwf_cfg, device="cpu")
+    setattr(no_replay, "_class_names", ["alice"])
+    incremental_train_lwf(no_replay, emb_b, config=lwf_cfg, device="cpu")
+    no_replay.eval()
+    with torch.no_grad():
+        acc_no_replay = (
+            no_replay(torch.from_numpy(emb_a.astype(np.float32))).argmax(dim=1) == 0
+        ).float().mean().item()
+
+    replay = CosineLinear(in_features=128, out_features=0)
+    store = ExemplarStore(tmp_path / "replay_lwf_exemplars")
+    replay_cfg = ReplayLwFConfig(
+        epochs=20,
+        batch_size=10,
+        lr=0.05,
+        temperature=2.0,
+        distill_weight=1.0,
+        replay_per_identity=5,
+    )
+    store.upsert_class("alice", emb_a)
+    incremental_train_replay_lwf(replay, store, emb_a, "alice", config=replay_cfg, device="cpu")
+    setattr(replay, "_class_names", ["alice"])
+    store.upsert_class("bob", emb_b)
+    incremental_train_replay_lwf(replay, store, emb_b, "bob", config=replay_cfg, device="cpu")
+    replay.eval()
+    with torch.no_grad():
+        acc_replay_lwf = (
+            replay(torch.from_numpy(emb_a.astype(np.float32))).argmax(dim=1) == 0
+        ).float().mean().item()
+
+    assert acc_replay_lwf >= acc_no_replay
+
+
+def test_replay_lwf_validates_replay_per_identity(tmp_path) -> None:
+    rng = np.random.default_rng(90)
+    emb_a = _make_class_embeddings(rng, direction_seed=0, n=8)
+    clf = CosineLinear(in_features=128, out_features=0)
+    store = ExemplarStore(tmp_path / "exemplars")
+    store.upsert_class("alice", emb_a)
+    with pytest.raises(ValueError, match="replay_per_identity must be > 0"):
+        incremental_train_replay_lwf(
+            clf,
+            store,
+            emb_a,
+            "alice",
+            config=ReplayLwFConfig(replay_per_identity=0),
+            device="cpu",
+        )
 
 
 def test_synthetic_replay_uses_classifier_order_for_old_classes(tmp_path) -> None:

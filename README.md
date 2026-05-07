@@ -65,7 +65,7 @@ def l2_normalize(x: np.ndarray, eps: float = 1e-12) -> np.ndarray:
 
 workspace = Path("experiments/run_demo_001")
 cfg = SystemConfig(
-    registration="naive",            # "naive" works; "replay"/"replay_lwf" are TODO stubs for now
+    registration="naive",            # "naive" | "replay" | "replay_lwf" | "synthetic_replay"
     exemplar_selection="herding",   # "herding" or "random"
     recognition="ncm",              # "ncm" or "classifier"
     exemplar_k=8,

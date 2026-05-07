@@ -18,6 +18,7 @@ LOG = logging.getLogger(__name__)
 _SelectMode = Literal["max_confidence", "all"]
 _OnFail = Literal["skip", "raise"]
 _Split = Literal["train", "test", "both"]
+_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 
 
 def _repo_root() -> Path:
@@ -94,6 +95,91 @@ def _safe_filename(s: str) -> str:
     # Keep it deterministic and filesystem-friendly.
     s2 = re.sub(r"[^\w\-]+", "_", s, flags=re.UNICODE).strip("_")
     return s2 or "item"
+
+
+def _image_paths_for_identity(
+    *,
+    dataset_root: Path,
+    identity: str,
+    train_count: int,
+    test_count: int,
+    test_start_index: int,
+) -> tuple[list[str], list[str]]:
+    identity_dir = dataset_root / identity
+    if not identity_dir.is_dir():
+        raise FileNotFoundError(f"Identity directory not found for {identity!r}: {identity_dir}")
+
+    files = sorted(
+        [
+            p
+            for p in identity_dir.iterdir()
+            if p.is_file() and p.suffix.lower() in _IMAGE_EXTS
+        ],
+        key=lambda p: p.name,
+    )
+    needed = test_start_index + test_count
+    extra_train = max(0, train_count - test_start_index)
+    needed = max(needed + extra_train, train_count + test_count)
+    if len(files) < needed:
+        raise RuntimeError(
+            f"Identity {identity!r} has {len(files)} images, requires at least {needed} "
+            f"for train_count={train_count}, test_count={test_count}, "
+            f"test_start_index={test_start_index}."
+        )
+
+    test_files = files[test_start_index : test_start_index + test_count]
+    train_prefix = files[:test_start_index]
+    train_suffix = files[test_start_index + test_count : test_start_index + test_count + extra_train]
+    train_files = (train_prefix + train_suffix)[:train_count]
+
+    train_paths = [str(Path("data/val") / identity / p.name) for p in train_files]
+    test_paths = [str(Path("data/val") / identity / p.name) for p in test_files]
+    return train_paths, test_paths
+
+
+def _expand_compact_identities(
+    *,
+    supertask_payload: dict,
+    supertask_json_path: Path,
+) -> list[dict]:
+    tasks_raw = supertask_payload.get("tasks", {}) or {}
+    if not isinstance(tasks_raw, dict) or not tasks_raw:
+        raise ValueError("Supertask JSON must include non-empty 'tasks'.")
+
+    constraints = supertask_payload.get("constraints", {}) or {}
+    train_count = int(constraints.get("train_images_per_identity", 50))
+    test_count = int(constraints.get("test_images_per_identity", 10))
+    test_start_index = int(constraints.get("test_start_index", 10))
+    if train_count <= 0 or test_count <= 0:
+        raise ValueError("train_images_per_identity and test_images_per_identity must be positive.")
+    if test_start_index < 0:
+        raise ValueError("test_start_index must be >= 0.")
+
+    dataset_root_rel = supertask_payload.get("dataset_root", "data/val")
+    dataset_root = _resolve_image_path(dataset_root_rel, base_dir=_repo_root())
+
+    identities: list[dict] = []
+    for task_name, idents in tasks_raw.items():
+        for identity in list(idents):
+            ident = str(identity).strip()
+            if not ident:
+                continue
+            train_paths, test_paths = _image_paths_for_identity(
+                dataset_root=dataset_root,
+                identity=ident,
+                train_count=train_count,
+                test_count=test_count,
+                test_start_index=test_start_index,
+            )
+            identities.append(
+                {
+                    "identity": ident,
+                    "task": str(task_name),
+                    "train_image_paths": train_paths,
+                    "test_image_paths": test_paths,
+                }
+            )
+    return identities
 
 
 def embed_images_to_dir(
@@ -286,6 +372,11 @@ def embed_supertask_identities_to_root(
 
     data = json.loads(supertask_json_path.read_text(encoding="utf-8"))
     identities = data.get("identities", [])
+    if not identities:
+        identities = _expand_compact_identities(
+            supertask_payload=data,
+            supertask_json_path=supertask_json_path,
+        )
 
     ids_set = set(identities_filter) if identities_filter is not None else None
 

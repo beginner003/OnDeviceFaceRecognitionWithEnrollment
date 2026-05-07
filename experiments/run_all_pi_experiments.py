@@ -1,4 +1,4 @@
-"""Run every Raspberry Pi 5 experiment and renew evaluation logs."""
+"""Run every Raspberry Pi 5 experiment across all set trials."""
 
 from __future__ import annotations
 
@@ -16,9 +16,11 @@ EXPERIMENT_SCRIPTS = (
     Path("experiments/baseline_classifier/run.py"),
     Path("experiments/baseline_ncm/run.py"),
     Path("experiments/replay_classifier/run.py"),
+    Path("experiments/replay_lwf_classifier/run.py"),
     Path("experiments/lwf_classifier/run.py"),
     Path("experiments/synthetic_replay_classifier/run.py"),
 )
+SET_NAMES = ("set1", "set2", "set3")
 
 
 def _repo_root() -> Path:
@@ -66,12 +68,20 @@ def _run_command(cmd: Sequence[str], *, repo_root: Path, log_path: Path) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Renew all experiment logs on Raspberry Pi 5."
+        description="Renew all experiment logs on Raspberry Pi 5 (full set-trial suite)."
     )
     parser.add_argument(
         "--reuse-embeddings",
         action="store_true",
         help="Reuse cached embeddings instead of recomputing them for every experiment.",
+    )
+    parser.add_argument(
+        "--single-run-only",
+        action="store_true",
+        help=(
+            "Run each experiment script once with its default supertask JSON (legacy behavior). "
+            "By default this script runs full set-trial suites via experiments/run_set_trials.py."
+        ),
     )
     args = parser.parse_args(list(argv) if argv is not None else None)
 
@@ -87,13 +97,34 @@ def main(argv: Sequence[str] | None = None) -> int:
         encoding="utf-8",
     )
 
+    if args.single_run_only:
+        for script in EXPERIMENT_SCRIPTS:
+            cmd = [sys.executable, str(script), "--reset-workspace"]
+            if not args.reuse_embeddings:
+                cmd.append("--overwrite-embeddings")
+            exit_code = _run_command(cmd, repo_root=repo_root, log_path=run_log)
+            if exit_code != 0:
+                return exit_code
+        return 0
+
+    suite_runner = Path("experiments/run_set_trials.py")
     for script in EXPERIMENT_SCRIPTS:
-        cmd = [sys.executable, str(script), "--reset-workspace"]
-        if not args.reuse_embeddings:
-            cmd.append("--overwrite-embeddings")
-        exit_code = _run_command(cmd, repo_root=repo_root, log_path=run_log)
-        if exit_code != 0:
-            return exit_code
+        for set_name in SET_NAMES:
+            cmd = [
+                sys.executable,
+                str(suite_runner),
+                "--runner",
+                str(script),
+                "--set-name",
+                set_name,
+                "--python",
+                sys.executable,
+            ]
+            if args.reuse_embeddings:
+                cmd.append("--reuse-embeddings")
+            exit_code = _run_command(cmd, repo_root=repo_root, log_path=run_log)
+            if exit_code != 0:
+                return exit_code
 
     return 0
 

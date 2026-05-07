@@ -1,0 +1,7 @@
+{
+  "registration": "replay",
+  "exemplar_selection": "herding",
+  "recognition": "classifier",
+  "exemplar_k": 5,
+  "confidence_threshold": 0.5
+}

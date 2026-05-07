@@ -21,6 +21,12 @@ from experiments.eval_utils import (
 )
 from experiments.experiment_logging import setup_experiment_logging
 from experiments.memory_metrics import peak_delta_mb, snapshot_peak_memory
+from experiments.registration_metrics import (
+    RegistrationEvent,
+    log_registration_event,
+    log_registration_summary,
+    take_storage_snapshot,
+)
 from src.system import FaceRecognitionSystem, SystemConfig
 
 
@@ -39,12 +45,9 @@ def _load_supertask_schema(path: Path) -> Tuple[List[str], Dict[str, List[str]],
     task_order = sorted(tasks.keys(), key=_task_sort_key)
 
     identity_task_map: Dict[str, int] = {}
-    for entry in raw.get("identities", []) or []:
-        ident = str(entry.get("identity", "")).strip()
-        task = str(entry.get("task", "")).strip()
-        if not ident or task not in tasks:
-            continue
-        identity_task_map[ident] = task_order.index(task)
+    for t_idx, task in enumerate(task_order):
+        for ident in tasks.get(task, []):
+            identity_task_map[str(ident)] = t_idx
 
     return task_order, tasks, identity_task_map
 
@@ -156,6 +159,7 @@ def main() -> None:
     per_task_results: List[Dict[str, float]] = []
     final_predictions = None
 
+    registration_events: List[RegistrationEvent] = []
     for task_name in task_order:
         task_started_at = time.perf_counter()
         mem_task_before = snapshot_peak_memory()
@@ -163,7 +167,18 @@ def main() -> None:
         for identity in tasks.get(task_name, []):
             progress.info("Registering person %s", identity)
             emb = np.asarray(train_embeddings[identity], dtype=np.float32)
-            system.register(identity, emb)
+            storage_before = take_storage_snapshot(workspace)
+            reg_result = system.register(identity, emb)
+            storage_after = take_storage_snapshot(workspace)
+            registration_events.append(
+                log_registration_event(
+                    metrics=metrics,
+                    task_name=task_name,
+                    result=reg_result,
+                    before=storage_before,
+                    after=storage_after,
+                )
+            )
         registration_seconds = time.perf_counter() - registration_started_at
 
         registered = system.identities()
@@ -209,6 +224,7 @@ def main() -> None:
         )
 
     mem_run_end = snapshot_peak_memory()
+    log_registration_summary(metrics=metrics, events=registration_events)
     metrics.info(
         "Overall peak memory: %.2f MB (run delta +%.2f MB)",
         mem_run_end.peak_rss_mb,

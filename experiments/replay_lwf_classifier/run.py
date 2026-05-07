@@ -1,9 +1,22 @@
+"""
+Integration experiment for replay-assisted LwFStrategy using FaceRecognitionSystem.
+
+Extracts real embeddings from data/val/ images via embedding_helper,
+uses pre-split train/test sets from supertask_8_2.json,
+registers identities incrementally per task order,
+and evaluates recognition accuracy on held-out test embeddings after each task step.
+
+Usage:
+    python -m experiments.replay_lwf_classifier.run --reset-workspace
+"""
+
 from __future__ import annotations
 
 import argparse
 import json
 import logging
 import math
+import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,10 +41,24 @@ from experiments.registration_metrics import (
     log_registration_summary,
     take_storage_snapshot,
 )
-from src.continual.naive_ft import NaiveFTConfig, NaiveFTStrategy
+from src.continual.replay_lwf import ReplayLwFConfig, ReplayLwFStrategy
 from src.memory.herding import HerdingSelector
 from src.recognition.classifier_based import ClassifierRecognizer
 from src.system import FaceRecognitionSystem
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+SUPERTASK_JSON = REPO_ROOT / "data" / "supertask_8_2.json"
+EXPERIMENT_ROOT = Path(__file__).resolve().parent
+
+EPOCHS = 10
+BATCH_SIZE = 10
+TEMPERATURE = 2.0
+DISTILL_WEIGHT = 1.0
+REPLAY_PER_IDENTITY = 5
+CONFIDENCE_THRESHOLD = 0.1
+MAX_NEW_EXEMPLARS = 50
+EXEMPLAR_K = 5
+SEED = 42
 
 
 @dataclass(frozen=True)
@@ -40,11 +67,8 @@ class TaskSpec:
     identities: List[str]
 
 
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parent.parent.parent
-
-
-def _load_supertask(path: Path) -> Tuple[List[TaskSpec], Dict[str, str], List[str]]:
+def _load_supertask(path: Path) -> Tuple[List[TaskSpec], Dict[str, int], List[str]]:
+    """Return (task_order, identity->task_index map, flat identity list)."""
     data = json.loads(path.read_text(encoding="utf-8"))
     tasks_raw: Dict[str, List[str]] = data["tasks"]
 
@@ -55,33 +79,15 @@ def _load_supertask(path: Path) -> Tuple[List[TaskSpec], Dict[str, str], List[st
     task_names = sorted(tasks_raw.keys(), key=task_sort_key)
     task_order = [TaskSpec(name=t, identities=list(tasks_raw[t])) for t in task_names]
 
-    identity_task_map: Dict[str, str] = {}
-    for t in task_order:
+    identity_task_map: Dict[str, int] = {}
+    for t_idx, t in enumerate(task_order):
         for ident in t.identities:
-            identity_task_map[str(ident)] = t.name
+            identity_task_map[str(ident)] = t_idx
 
     identity_order: List[str] = []
     for t in task_order:
         identity_order.extend(t.identities)
     return task_order, identity_task_map, identity_order
-
-
-def _ensure_clean_workspace(workspace: Path, *, reset: bool) -> None:
-    if not workspace.exists():
-        return
-    if reset:
-        for p in sorted(workspace.glob("**/*"), reverse=True):
-            if p.is_file() or p.is_symlink():
-                p.unlink()
-            elif p.is_dir():
-                try:
-                    p.rmdir()
-                except OSError:
-                    pass
-        try:
-            workspace.rmdir()
-        except OSError:
-            pass
 
 
 def _load_embeddings(embeddings_root: Path, identity: str, split: str) -> np.ndarray:
@@ -95,61 +101,44 @@ def _load_embeddings(embeddings_root: Path, identity: str, split: str) -> np.nda
     return emb
 
 
-def _identity_task_index_map(task_order: Sequence[TaskSpec]) -> Dict[str, int]:
-    out: Dict[str, int] = {}
-    for t_idx, task in enumerate(task_order):
-        for ident in task.identities:
-            out[str(ident)] = t_idx
-    return out
+def _ensure_workspace(workspace: Path, *, reset: bool) -> None:
+    if reset and workspace.exists():
+        shutil.rmtree(workspace, ignore_errors=True)
+    workspace.mkdir(parents=True, exist_ok=True)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Baseline classifier-based continual FR experiment.")
+    parser = argparse.ArgumentParser(description="Replay + LwF continual FR experiment.")
     parser.add_argument(
         "--supertask-json",
         type=str,
-        default=str(_repo_root() / "data" / "supertask_8_2.json"),
+        default=str(SUPERTASK_JSON),
         help="Path to the supertask JSON (default: data/supertask_8_2.json).",
     )
     parser.add_argument(
         "--experiment-root",
         type=str,
-        default=str(Path(__file__).resolve().parent),
-        help="Experiment directory root (default: experiments/baseline_classifier).",
+        default=str(EXPERIMENT_ROOT),
+        help="Experiment directory root (default: experiments/replay_lwf_classifier).",
     )
     parser.add_argument(
         "--reset-workspace",
         action="store_true",
-        help="Delete the experiment workspace before running (recommended for clean runs).",
+        help="Delete and recreate the experiment workspace before running.",
     )
     parser.add_argument(
         "--overwrite-embeddings",
         action="store_true",
         help="Recompute embeddings even if cached embeddings exist.",
     )
-    parser.add_argument(
-        "--confidence-threshold",
-        type=float,
-        default=0.1,
-        help=(
-            "Min max-softmax probability to accept a name (else 'unknown'). "
-            "For K-way classifiers, max prob is often well below 0.5 even when top-1 is correct; "
-            "use 0.0 for closed-set accuracy (always take argmax). Raise toward 1/K for stricter rejection."
-        ),
-    )
-    parser.add_argument(
-        "--epochs",
-        type=int,
-        default=10,
-        help="Number of SGD epochs for each incremental update (naive fine-tuning).",
-    )
-    parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=10,
-        help="SGD mini-batch size for each incremental update (naive fine-tuning).",
-    )
-
+    parser.add_argument("--epochs", type=int, default=EPOCHS)
+    parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
+    parser.add_argument("--temperature", type=float, default=TEMPERATURE)
+    parser.add_argument("--distill-weight", type=float, default=DISTILL_WEIGHT)
+    parser.add_argument("--replay-per-identity", type=int, default=REPLAY_PER_IDENTITY)
+    parser.add_argument("--confidence-threshold", type=float, default=CONFIDENCE_THRESHOLD)
+    parser.add_argument("--max-new-exemplars", type=int, default=MAX_NEW_EXEMPLARS)
+    parser.add_argument("--exemplar-k", type=int, default=EXEMPLAR_K)
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     logging.basicConfig(level=logging.WARNING)
@@ -158,29 +147,34 @@ def main(argv: Sequence[str] | None = None) -> int:
     experiment_root = Path(args.experiment_root).expanduser().resolve()
     embeddings_root = experiment_root / "embeddings"
     workspace_dir = experiment_root / "workspace"
+    _ensure_workspace(workspace_dir, reset=bool(args.reset_workspace))
     logs_dir = experiment_root / "logs"
 
-    loggers = setup_experiment_logging(log_dir=logs_dir, experiment_name="baseline_classifier")
+    loggers = setup_experiment_logging(log_dir=logs_dir, experiment_name="replay_lwf_integration")
     progress = loggers.progress
     metrics = loggers.metrics
     mem_run_start = snapshot_peak_memory()
     run_started_at = time.perf_counter()
     metrics.info("========================================")
     metrics.info("Run configuration")
+    metrics.info("  strategy: replay_lwf")
     metrics.info("  epochs: %d", int(args.epochs))
     metrics.info("  batch_size: %d", int(args.batch_size))
+    metrics.info("  temperature: %.4f", float(args.temperature))
+    metrics.info("  distill_weight: %.4f", float(args.distill_weight))
+    metrics.info("  replay_per_identity: %d", int(args.replay_per_identity))
     metrics.info("  confidence_threshold: %.4f", float(args.confidence_threshold))
+    metrics.info("  exemplar_k (stored per identity): %d", int(args.exemplar_k))
+    metrics.info("  max new-identity training samples: %d", int(args.max_new_exemplars))
     metrics.info("========================================")
 
-    task_order, _, identity_order = _load_supertask(supertask_path)
+    task_order, id_to_task_idx, identity_order = _load_supertask(supertask_path)
     all_identities = list(identity_order)
-    id_to_task_idx = _identity_task_index_map(task_order)
     task_column_names = [t.name for t in task_order]
 
-    # 1) Embed (train + test), one identity at a time for readable terminal progress.
     embedding_started_at = time.perf_counter()
     for ident in all_identities:
-        progress.info("Embedding started for person %s (train)", ident)
+        progress.info("Embedding %s (train)", ident)
         embed_supertask_identities_to_root(
             supertask_json_path=supertask_path,
             output_root=embeddings_root,
@@ -189,7 +183,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             overwrite=bool(args.overwrite_embeddings),
         )
     for ident in all_identities:
-        progress.info("Embedding started for person %s (test)", ident)
+        progress.info("Embedding %s (test)", ident)
         embed_supertask_identities_to_root(
             supertask_json_path=supertask_path,
             output_root=embeddings_root,
@@ -205,28 +199,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     metrics.info("Embedding time seconds: %.3f", time.perf_counter() - embedding_started_at)
 
-    _ensure_clean_workspace(workspace_dir, reset=bool(args.reset_workspace))
-    confidence_threshold = float(args.confidence_threshold)
-    system = FaceRecognitionSystem(
-        registration_strategy=NaiveFTStrategy(
-            config=NaiveFTConfig(
-                epochs=int(args.epochs),
-                batch_size=int(args.batch_size),
-            )
-        ),
-        exemplar_selector=HerdingSelector(),
-        recognition_strategy=ClassifierRecognizer(confidence_threshold=confidence_threshold),
-        workspace=workspace_dir,
-        exemplar_k=5,
-        confidence_threshold=confidence_threshold,
-    )
-    system.load()
-    if system.identities() and not args.reset_workspace:
-        raise RuntimeError(
-            f"Workspace {workspace_dir} already has registered identities: {system.identities()}. "
-            "Re-run with --reset-workspace for a clean baseline run."
-        )
-
     train_embeddings: Dict[str, np.ndarray] = {
         ident: _load_embeddings(embeddings_root, ident, "train") for ident in all_identities
     }
@@ -234,19 +206,55 @@ def main(argv: Sequence[str] | None = None) -> int:
         ident: _load_embeddings(embeddings_root, ident, "test") for ident in all_identities
     }
 
+    for ident in all_identities:
+        progress.info(
+            "  %s: %d train, %d test",
+            ident,
+            train_embeddings[ident].shape[0],
+            test_embeddings[ident].shape[0],
+        )
+
+    system = FaceRecognitionSystem(
+        registration_strategy=ReplayLwFStrategy(
+            config=ReplayLwFConfig(
+                epochs=int(args.epochs),
+                batch_size=int(args.batch_size),
+                temperature=float(args.temperature),
+                distill_weight=float(args.distill_weight),
+                replay_per_identity=int(args.replay_per_identity),
+            )
+        ),
+        exemplar_selector=HerdingSelector(),
+        recognition_strategy=ClassifierRecognizer(confidence_threshold=float(args.confidence_threshold)),
+        workspace=workspace_dir,
+        exemplar_k=int(args.exemplar_k),
+        confidence_threshold=float(args.confidence_threshold),
+    )
+    system.load()
+    if not args.reset_workspace and system.identities():
+        raise RuntimeError(
+            "Workspace already contains a saved system state. "
+            "Use --reset-workspace to start fresh or remove the workspace manually."
+        )
+
     per_task_results: List[Dict[str, float]] = []
     final_predictions = None
-
     registered: List[str] = []
     registration_events: List[RegistrationEvent] = []
+    rng = np.random.default_rng(SEED)
+
     for task in task_order:
         task_started_at = time.perf_counter()
         mem_task_before = snapshot_peak_memory()
         registration_started_at = time.perf_counter()
         for ident in task.identities:
-            progress.info("Registering person %s", ident)
+            emb = train_embeddings[ident]
+            if emb.shape[0] > int(args.max_new_exemplars):
+                idx = rng.choice(emb.shape[0], int(args.max_new_exemplars), replace=False)
+                emb = emb[idx]
+            progress.info("Registering %s (%d embeddings)", ident, emb.shape[0])
             storage_before = take_storage_snapshot(workspace_dir)
-            reg_result = system.register(ident, train_embeddings[ident])
+            reg_result = system.register(ident, emb)
             storage_after = take_storage_snapshot(workspace_dir)
             registration_events.append(
                 log_registration_event(
@@ -285,9 +293,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             peak_delta_mb(mem_task_before, mem_task_after),
         )
 
-    A, identity_names = compute_accuracy_matrix(per_task_results, task_column_names, id_to_task_idx)
+    A, identity_names = compute_accuracy_matrix(
+        per_task_results,
+        task_column_names,
+        id_to_task_idx,
+    )
     print_per_task_table(A, task_column_names, identity_names, logger=metrics)
-    print_summary_metrics(A, logger=metrics)
+    summary = print_summary_metrics(A, logger=metrics)
 
     forgetting = compute_forgetting(A)
     for ident, f in zip(identity_names, forgetting.tolist()):
@@ -309,7 +321,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         peak_delta_mb(mem_run_start, mem_run_end),
     )
     metrics.info("Overall run time seconds: %.3f", time.perf_counter() - run_started_at)
+    progress.info("=" * 50)
+    progress.info("Results  (full detail in %s)", logs_dir / "evaluation.log")
+    progress.info("  average_accuracy:   %.4f", summary["average_accuracy"])
+    progress.info("  average_forgetting: %.4f", summary["average_forgetting"])
+    progress.info("  backward_transfer:  %.4f", summary["backward_transfer"])
+    progress.info("  workspace:          %s", workspace_dir)
+    progress.info("=" * 50)
 
+    metrics.info("Workspace retained at %s", workspace_dir)
     return 0
 
 

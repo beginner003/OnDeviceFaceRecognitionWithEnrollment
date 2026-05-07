@@ -1,0 +1,38 @@
+{
+  "name": "supertask_set1_trial2",
+  "source": "experiments/generate_supertask_suite.py",
+  "scenario": {
+    "type": "on_device_evaluation",
+    "task_grouping": "set1_trial2"
+  },
+  "set": "set1",
+  "trial": 2,
+  "tasks": {
+    "task0": [
+      "n000129",
+      "n000363",
+      "n000659",
+      "n000774",
+      "n000854"
+    ],
+    "task1": [
+      "n000912"
+    ],
+    "task2": [
+      "n000998"
+    ],
+    "task3": [
+      "n001156"
+    ],
+    "task4": [
+      "n001256",
+      "n001277"
+    ]
+  },
+  "dataset_root": "data/val",
+  "constraints": {
+    "train_images_per_identity": 50,
+    "test_images_per_identity": 10,
+    "test_start_index": 10
+  }
+}

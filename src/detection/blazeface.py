@@ -116,6 +116,9 @@ class BlazeFaceDetector:
         if log_raw_inference is None:
             log_raw_inference = _env_flag_truthy(_RAW_ENV)
         self._log_raw_inference = bool(log_raw_inference)
+        self._fallback_min_confidence = float(
+            os.environ.get("BLAZEFACE_FALLBACK_MIN_CONFIDENCE", "0.2")
+        )
         if mp is None:
             raise RuntimeError(
                 "MediaPipe is required for BlazeFaceDetector. "
@@ -151,7 +154,7 @@ class BlazeFaceDetector:
             cpu_num_threads=self._cpu_num_threads,
         )
 
-    def _init_tasks_backend(
+    def _build_tasks_detector(
         self,
         python_mod,
         vision_mod,
@@ -159,7 +162,7 @@ class BlazeFaceDetector:
         min_detection_confidence: float,
         min_suppression_threshold: float,
         cpu_num_threads: int = 1,
-    ) -> None:
+    ):
         # cpu_num_threads=1 is a workaround for a MediaPipe XNNPACK regression on
         # Linux aarch64 (Raspberry Pi) that produces an incorrect output tensor shape
         # for the BlazeFace SSD model, causing a TensorsToDetectionsCalculator crash.
@@ -179,13 +182,31 @@ class BlazeFaceDetector:
             min_detection_confidence=min_detection_confidence,
             min_suppression_threshold=min_suppression_threshold,
         )
-        self._tasks_detector = vision_mod.FaceDetector.create_from_options(options)
+        return vision_mod.FaceDetector.create_from_options(options)
+
+    def _init_tasks_backend(
+        self,
+        python_mod,
+        vision_mod,
+        model_path: Path,
+        min_detection_confidence: float,
+        min_suppression_threshold: float,
+        cpu_num_threads: int = 1,
+    ) -> None:
+        self._tasks_detector = self._build_tasks_detector(
+            python_mod=python_mod,
+            vision_mod=vision_mod,
+            model_path=model_path,
+            min_detection_confidence=min_detection_confidence,
+            min_suppression_threshold=min_suppression_threshold,
+            cpu_num_threads=cpu_num_threads,
+        )
 
     def close(self) -> None:
         if self._tasks_detector is not None:
             self._tasks_detector.close()
             self._tasks_detector = None
-
+    
     def __enter__(self) -> "BlazeFaceDetector":
         return self
 
@@ -223,38 +244,68 @@ class BlazeFaceDetector:
 
     def _detect_mediapipe_tasks(self, bgr_frame: np.ndarray) -> List[Detection]:
         h, w = bgr_frame.shape[:2]
-        detections = self._detect_tasks_on_frame(bgr_frame, inference_pass="native")
+        detections = self._detect_tasks_on_frame(
+            bgr_frame, inference_pass="native", detector=self._tasks_detector
+        )
         if detections:
             return detections
 
-        # Fallback: retry on downscaled frame for very high-res inputs where
-        # face occupies too few pixels at native resolution.
         max_dim = max(h, w)
-        if max_dim <= 1280:
-            return detections
 
-        scale = 1280.0 / float(max_dim)
-        sw, sh = int(round(w * scale)), int(round(h * scale))
-        resized = cv2.resize(bgr_frame, (sw, sh), interpolation=cv2.INTER_AREA)
-        small_detections = self._detect_tasks_on_frame(
-            resized, inference_pass="downscale_1280"
-        )
-        if not small_detections:
-            return small_detections
-
-        inv = 1.0 / scale
-        upscaled: List[Detection] = []
-        for det in small_detections:
-            x, y, bw, bh = det.bbox
-            ux = max(0, min(int(round(x * inv)), w - 1))
-            uy = max(0, min(int(round(y * inv)), h - 1))
-            ubw = max(1, min(int(round(bw * inv)), w - ux))
-            ubh = max(1, min(int(round(bh * inv)), h - uy))
-            ulm = (det.landmarks_6pt * inv).astype(np.float32)
-            upscaled.append(
-                Detection(bbox=(ux, uy, ubw, ubh), landmarks_6pt=ulm, confidence=det.confidence)
+        # Fallback 1: downscale very large frames to improve detector receptive field.
+        if max_dim > 1280:
+            scale = 1280.0 / float(max_dim)
+            sw, sh = int(round(w * scale)), int(round(h * scale))
+            resized = cv2.resize(bgr_frame, (sw, sh), interpolation=cv2.INTER_AREA)
+            small_detections = self._detect_tasks_on_frame(
+                resized, inference_pass="downscale_1280", detector=self._tasks_detector
             )
-        return upscaled
+            if small_detections:
+                return self._rescale_detections(small_detections, 1.0 / scale, w=w, h=h)
+
+        # Fallback 2: upscale small/medium frames to recover tiny faces.
+        upscale = 1.6
+        if max_dim < 1400:
+            uw, uh = int(round(w * upscale)), int(round(h * upscale))
+            up = cv2.resize(bgr_frame, (uw, uh), interpolation=cv2.INTER_CUBIC)
+            up_detections = self._detect_tasks_on_frame(
+                up, inference_pass="upscale_1_6x", detector=self._tasks_detector
+            )
+            if up_detections:
+                return self._rescale_detections(up_detections, 1.0 / upscale, w=w, h=h)
+
+        # Fallback 3: relaxed confidence gate for difficult frames on Pi.
+        relaxed_thr = float(self._fallback_min_confidence)
+        if 0.0 < relaxed_thr < float(self.min_confidence):
+            relaxed = self._detect_tasks_on_frame(
+                bgr_frame,
+                inference_pass="native_relaxed",
+                detector=self._tasks_detector,
+                min_confidence=relaxed_thr,
+            )
+            if relaxed:
+                return [max(relaxed, key=lambda d: float(d.confidence))]
+
+        return []
+
+    @staticmethod
+    def _rescale_detections(
+        detections: List[Detection],
+        inv_scale: float,
+        *,
+        w: int,
+        h: int,
+    ) -> List[Detection]:
+        out: List[Detection] = []
+        for det in detections:
+            x, y, bw, bh = det.bbox
+            ux = max(0, min(int(round(x * inv_scale)), w - 1))
+            uy = max(0, min(int(round(y * inv_scale)), h - 1))
+            ubw = max(1, min(int(round(bw * inv_scale)), w - ux))
+            ubh = max(1, min(int(round(bh * inv_scale)), h - uy))
+            ulm = (det.landmarks_6pt * inv_scale).astype(np.float32)
+            out.append(Detection(bbox=(ux, uy, ubw, ubh), landmarks_6pt=ulm, confidence=det.confidence))
+        return out
 
     def _log_raw_tasks_result(
         self,
@@ -305,12 +356,19 @@ class BlazeFaceDetector:
             )
 
     def _detect_tasks_on_frame(
-        self, bgr_frame: np.ndarray, *, inference_pass: str = "frame"
+        self,
+        bgr_frame: np.ndarray,
+        *,
+        inference_pass: str = "frame",
+        detector=None,
+        min_confidence: float | None = None,
     ) -> List[Detection]:
+        if detector is None:
+            detector = self._tasks_detector
         h, w = bgr_frame.shape[:2]
         rgb = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-        result = self._tasks_detector.detect(mp_image)
+        result = detector.detect(mp_image)
         self._log_raw_tasks_result(result, (h, w), inference_pass)
         detections: List[Detection] = []
 
@@ -319,7 +377,8 @@ class BlazeFaceDetector:
 
         for det in result.detections:
             conf = float(det.categories[0].score) if getattr(det, "categories", None) else 0.0
-            if conf < self.min_confidence:
+            threshold = self.min_confidence if min_confidence is None else float(min_confidence)
+            if conf < threshold:
                 continue
 
             bbox = det.bounding_box

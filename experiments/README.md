@@ -11,6 +11,12 @@ Embedding extraction needs OpenCV (`cv2`) and a MobileFaceNet `.tflite` under `s
 
 Each experiment renews its own `logs/evaluation.log` on every run. Logs report the midterm metrics: overall/per-class accuracy, forgetting/backward transfer, registration/update time, evaluation time, overall runtime, and peak RSS memory.
 
+All experiment runners now also log per-face registration/storage details:
+- elapsed registration time per face,
+- in-memory exemplar/Gaussian byte counters from `FaceRecognitionSystem.register(...)`,
+- on-disk exemplar/Gaussian `.npz` footprint and per-face delta,
+- summary averages (including average storage growth per new face).
+
 ---
 
 ## Renew all Pi experiment logs
@@ -26,6 +32,44 @@ This runs every experiment with `--reset-workspace --overwrite-embeddings` and w
 ```bash
 PYTHONPATH=. python experiments/run_all_pi_experiments.py --reuse-embeddings
 ```
+
+---
+
+## Generate multi-trial supertask suite (Set1/Set2/Set3)
+
+Create the 9 requested supertasks (3 trials each for set1/set2/set3):
+
+```bash
+PYTHONPATH=. python experiments/generate_supertask_suite.py
+```
+
+Generated files:
+- `data/supertask_suite/set1_trial1.json` (original 8.2 split)
+- `data/supertask_suite/set1_trial2.json`
+- `data/supertask_suite/set1_trial3.json`
+- `data/supertask_suite/set2_trial1.json` .. `set2_trial3.json` (5 initial + incremental to 20)
+- `data/supertask_suite/set3_trial1.json` .. `set3_trial3.json` (5 initial + incremental to 30)
+
+Compact supertask JSONs in this suite define `tasks` + split constraints, and are expanded automatically at embedding time.
+
+---
+
+## One consolidated log per set (3 trials + average)
+
+Run one experiment method for an entire set and produce one log file that includes, for each of the three trials, the **full** `logs/evaluation.log` content from that run (configuration, per-face registration lines, per-task timing, per-task accuracy table, forgetting, confusion matrix, registration/storage summary, peak memory, etc.). After the third trial, a **SET SUMMARY** section lists per-trial headline metrics and the **mean** across trials.
+
+```bash
+PYTHONPATH=. python experiments/run_set_trials.py \
+  --runner experiments/lwf_classifier/run.py \
+  --set-name set1
+```
+
+Output log path (banner lines use the same `%(asctime)s | INFO |` style as `evaluation.log`):
+- `experiments/<method>/logs/sets/set1.log` (or `set2.log`, `set3.log`)
+
+Options:
+- add `--reuse-embeddings` to skip `--overwrite-embeddings`,
+- add `--experiment-root <path>` if you want a custom experiment root.
 
 ---
 
@@ -67,6 +111,77 @@ Paths for `--supertask-json`, `--embeddings-root`, and `--workspace` may be abso
 
 ---
 
+## Exemplar replay classifier (`replay_classifier`)
+
+Replays stored exemplars from all previous identities during incremental training. Defaults: `data/supertask_8_2.json`, `experiments/replay_classifier/embeddings`, `experiments/replay_classifier/workspace`.
+
+```bash
+PYTHONPATH=. python experiments/replay_classifier/run.py --reset-workspace
+```
+
+| Flag | Description |
+|------|-------------|
+| `--supertask-json PATH` | Supertask JSON (default: `data/supertask_8_2.json`). |
+| `--experiment-root PATH` | Experiment root directory (default: `experiments/replay_classifier`). |
+| `--reset-workspace` | Delete and recreate the `workspace/` directory before running. |
+| `--overwrite-embeddings` | Recompute embeddings even if cached data exists. |
+| `--confidence-threshold FLOAT` | Recognition threshold for classifier-based recognition (default: `0.1`). |
+| `--epochs INT` | Number of SGD epochs for each incremental update (default: `10`). |
+| `--batch-size INT` | SGD mini-batch size for each incremental update (default: `10`). |
+| `--max-new-exemplars INT` | Max sampled train embeddings from the newly registered identity (default: `50`). |
+| `--exemplar-k INT` | Number of exemplars stored per identity (default: `5`). |
+
+---
+
+## Replay + LwF classifier (`replay_lwf_classifier`)
+
+Hybrid method: trains the student with both exemplar replay from old identities and LwF distillation from a frozen teacher. Replay uses up to 5 stored exemplars per old identity by default.
+
+```bash
+PYTHONPATH=. python experiments/replay_lwf_classifier/run.py --reset-workspace
+```
+
+| Flag | Description |
+|------|-------------|
+| `--supertask-json PATH` | Supertask JSON (default: `data/supertask_8_2.json`). |
+| `--experiment-root PATH` | Experiment root directory (default: `experiments/replay_lwf_classifier`). |
+| `--reset-workspace` | Delete and recreate the `workspace/` directory before running. |
+| `--overwrite-embeddings` | Recompute embeddings even if cached data exists. |
+| `--confidence-threshold FLOAT` | Recognition threshold for classifier-based recognition (default: `0.1`). |
+| `--epochs INT` | Number of SGD epochs for each incremental update (default: `10`). |
+| `--batch-size INT` | SGD mini-batch size for each incremental update (default: `10`). |
+| `--temperature FLOAT` | Distillation temperature (default: `2.0`). |
+| `--distill-weight FLOAT` | Weight of the KL distillation term (default: `1.0`). |
+| `--replay-per-identity INT` | Max replay exemplars per previous identity during updates (default: `5`). |
+| `--max-new-exemplars INT` | Max sampled train embeddings from the newly registered identity (default: `50`). |
+| `--exemplar-k INT` | Number of exemplars stored per identity (default: `5`). |
+
+---
+
+## LwF classifier (`lwf_classifier`)
+
+No-replay LwF baseline: trains only on new identity embeddings while distilling old-class outputs from a frozen teacher.
+
+```bash
+PYTHONPATH=. python experiments/lwf_classifier/run.py --reset-workspace
+```
+
+| Flag | Description |
+|------|-------------|
+| `--supertask-json PATH` | Supertask JSON (default: `data/supertask_8_2.json`). |
+| `--experiment-root PATH` | Experiment root directory (default: `experiments/lwf_classifier`). |
+| `--reset-workspace` | Delete and recreate the `workspace/` directory before running. |
+| `--overwrite-embeddings` | Recompute embeddings even if cached data exists. |
+| `--confidence-threshold FLOAT` | Recognition threshold for classifier-based recognition (default: `0.1`). |
+| `--epochs INT` | Number of SGD epochs for each incremental update (default: `10`). |
+| `--batch-size INT` | SGD mini-batch size for each incremental update (default: `10`). |
+| `--temperature FLOAT` | Distillation temperature (default: `2.0`). |
+| `--distill-weight FLOAT` | Weight of the KL distillation term (default: `1.0`). |
+| `--max-new-exemplars INT` | Max sampled train embeddings from the newly registered identity (default: `50`). |
+| `--exemplar-k INT` | Number of exemplars stored per identity (default: `5`). |
+
+---
+
 ## Synthetic replay classifier (`synthetic_replay_classifier`)
 
 Synthetic replay generates synthetic samples for old classes from a per-identity Gaussian model. In the current implementation, the Gaussian parameters are fit from the full set of extracted embeddings for each new identity rather than only the selected `exemplar_k` subset.
@@ -101,6 +216,7 @@ PYTHONPATH=. python experiments/synthetic_replay_classifier/run.py --reset-works
 PYTHONPATH=. python experiments/baseline_classifier/run.py --help
 PYTHONPATH=. python experiments/baseline_ncm/run.py --help
 PYTHONPATH=. python experiments/replay_classifier/run.py --help
+PYTHONPATH=. python experiments/replay_lwf_classifier/run.py --help
 PYTHONPATH=. python experiments/lwf_classifier/run.py --help
 PYTHONPATH=. python experiments/synthetic_replay_classifier/run.py --help
 ```

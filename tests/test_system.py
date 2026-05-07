@@ -105,3 +105,27 @@ def test_system_replay_registers_and_persists_exemplars(tmp_path: Path) -> None:
 
     loaded = FaceRecognitionSystem.from_config(cfg, workspace=tmp_path)
     assert loaded.identities() == ["alice"]
+
+
+def test_system_replay_lwf_registers_and_persists_exemplars(tmp_path: Path) -> None:
+    cfg = SystemConfig(
+        registration="replay_lwf",
+        exemplar_selection="herding",
+        recognition="classifier",
+        exemplar_k=5,
+        confidence_threshold=0.0,
+    )
+    system = FaceRecognitionSystem.from_config(cfg, workspace=tmp_path)
+    c1 = np.eye(1, 128, 0, dtype=np.float32).reshape(-1)
+    c2 = np.eye(1, 128, 1, dtype=np.float32).reshape(-1)
+
+    first = system.register("alice", _cluster(c1, n=8, seed=101))
+    assert first.selected_count == 5
+    second = system.register("bob", _cluster(c2, n=8, seed=102))
+    assert second.selected_count == 5
+    assert system.identities() == ["alice", "bob"]
+    assert (tmp_path / "exemplars" / "alice" / "exemplars.npz").is_file()
+    assert (tmp_path / "exemplars" / "bob" / "exemplars.npz").is_file()
+
+    reloaded = FaceRecognitionSystem.from_config(cfg, workspace=tmp_path)
+    assert reloaded.identities() == ["alice", "bob"]

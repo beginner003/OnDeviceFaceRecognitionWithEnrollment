@@ -1,0 +1,100 @@
+{
+  "name": "supertask_set3_trial3",
+  "source": "experiments/generate_supertask_suite.py",
+  "scenario": {
+    "type": "on_device_evaluation",
+    "task_grouping": "set3_trial3"
+  },
+  "set": "set3",
+  "trial": 3,
+  "tasks": {
+    "task0": [
+      "n000001",
+      "n000009",
+      "n000106",
+      "n000149",
+      "n000410"
+    ],
+    "task1": [
+      "n000452"
+    ],
+    "task2": [
+      "n000480"
+    ],
+    "task3": [
+      "n000596"
+    ],
+    "task4": [
+      "n000654"
+    ],
+    "task5": [
+      "n000658"
+    ],
+    "task6": [
+      "n000689"
+    ],
+    "task7": [
+      "n000736"
+    ],
+    "task8": [
+      "n000740"
+    ],
+    "task9": [
+      "n000775"
+    ],
+    "task10": [
+      "n000838"
+    ],
+    "task11": [
+      "n000950"
+    ],
+    "task12": [
+      "n001059"
+    ],
+    "task13": [
+      "n001125"
+    ],
+    "task14": [
+      "n001127"
+    ],
+    "task15": [
+      "n001153"
+    ],
+    "task16": [
+      "n001156"
+    ],
+    "task17": [
+      "n001174"
+    ],
+    "task18": [
+      "n001197"
+    ],
+    "task19": [
+      "n001199"
+    ],
+    "task20": [
+      "n001211"
+    ],
+    "task21": [
+      "n001242"
+    ],
+    "task22": [
+      "n001256"
+    ],
+    "task23": [
+      "n001291"
+    ],
+    "task24": [
+      "n001293"
+    ],
+    "task25": [
+      "n001296"
+    ]
+  },
+  "dataset_root": "data/val",
+  "constraints": {
+    "train_images_per_identity": 50,
+    "test_images_per_identity": 10,
+    "test_start_index": 10
+  }
+}

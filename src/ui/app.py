@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 import time
@@ -27,6 +28,8 @@ from src.ui.registration_capture import (
 
 
 _UI_DIR = Path(__file__).resolve().parent
+_LOG = logging.getLogger("face_ui.registration")
+_LOG.setLevel(logging.INFO)
 
 
 class RegisterBody(BaseModel):
@@ -245,6 +248,13 @@ def create_app() -> FastAPI:
 
             ctx.registration_busy = True
             ctx.bump_registration(phase="queued", message="Starting capture…")
+            start_seq = int(ctx.registration_state.get("seq", 0))
+            _LOG.info(
+                "register requested identity=%s n_frames=%d start_seq=%d",
+                identity,
+                int(body.n_frames),
+                start_seq,
+            )
 
         def worker() -> None:
             time.sleep(0.15)
@@ -254,10 +264,20 @@ def create_app() -> FastAPI:
                     qc, ql, qr = quotas_three_way(body.n_frames)
                 except ValueError as exc:
                     ctx.bump_registration(phase="error", message=str(exc))
+                    _LOG.exception("registration quota split failed identity=%s", identity)
                     return
 
                 total = body.n_frames
                 dup = float(os.environ.get("FACE_UI_REG_DEDUP_SIM", "0.995"))
+                _LOG.info(
+                    "registration worker start identity=%s total=%d quota(center,left,right)=(%d,%d,%d) dup=%.4f",
+                    identity,
+                    int(total),
+                    int(qc),
+                    int(ql),
+                    int(qr),
+                    float(dup),
+                )
 
                 def bump_cb(payload: dict) -> None:
                     ctx.bump_registration(**payload)
@@ -282,6 +302,13 @@ def create_app() -> FastAPI:
 
                 for pose, quota in (("center", qc), ("left", ql), ("right", qr)):
                     baseline = len(embedding_session)
+                    _LOG.info(
+                        "collect pose start identity=%s pose=%s quota=%d baseline=%d",
+                        identity,
+                        pose,
+                        int(quota),
+                        int(baseline),
+                    )
                     bucket = collect_embeddings_for_pose(
                         capture=ctx.capture,
                         detector=ctx.detector,
@@ -295,6 +322,13 @@ def create_app() -> FastAPI:
                         bump=bump_cb,
                     )
                     if len(bucket) < quota:
+                        _LOG.warning(
+                            "collect pose incomplete identity=%s pose=%s collected=%d quota=%d",
+                            identity,
+                            pose,
+                            len(bucket),
+                            int(quota),
+                        )
                         ctx.bump_registration(
                             phase="error",
                             message=(
@@ -307,6 +341,13 @@ def create_app() -> FastAPI:
                         )
                         return
                     embedding_session.extend(bucket)
+                    _LOG.info(
+                        "collect pose done identity=%s pose=%s collected=%d/%d",
+                        identity,
+                        pose,
+                        len(bucket),
+                        int(quota),
+                    )
 
                 emb_mat = np.stack(embedding_session, axis=0).astype(np.float32, copy=False)
                 embedding_session.clear()
@@ -327,6 +368,13 @@ def create_app() -> FastAPI:
                         result = ctx.system.register(identity, emb_mat)
                 finally:
                     del emb_mat
+                _LOG.info(
+                    "registration training done identity=%s selected=%d total_identities=%d elapsed=%.3fs",
+                    result.identity,
+                    int(result.selected_count),
+                    int(result.total_identities),
+                    float(result.elapsed_s),
+                )
 
                 ctx.bump_registration(
                     phase="done",
@@ -341,25 +389,29 @@ def create_app() -> FastAPI:
                 )
             except ValueError as exc:
                 ctx.bump_registration(phase="error", message=str(exc), instruction="")
+                _LOG.exception("registration value error identity=%s", identity)
             except Exception as exc:  # pragma: no cover
                 ctx.bump_registration(
                     phase="error",
                     message=f"{type(exc).__name__}: {exc}",
                     instruction="",
                 )
+                _LOG.exception("registration failed identity=%s", identity)
             finally:
                 embedding_session.clear()
                 ctx.registration_busy = False
+                _LOG.info("registration worker finished identity=%s", identity)
 
         threading.Thread(target=worker, daemon=True).start()
-        return JSONResponse({"ok": True})
+        return JSONResponse({"ok": True, "start_seq": start_seq})
 
     @app.get("/register/stream")
-    def register_stream() -> StreamingResponse:
+    def register_stream(after_seq: int = -1) -> StreamingResponse:
         ctx = get_ctx()
+        _LOG.info("register stream opened after_seq=%d", int(after_seq))
 
         def gen() -> Generator[str, None, None]:
-            last_seq = -1
+            last_seq = int(after_seq)
             while True:
                 with ctx.registration_state_lock:
                     seq = int(ctx.registration_state.get("seq", 0))
@@ -368,6 +420,11 @@ def create_app() -> FastAPI:
                     last_seq = seq
                     yield f"data: {json.dumps(payload)}\n\n"
                     if payload.get("phase") in ("done", "error"):
+                        _LOG.info(
+                            "register stream terminal phase=%s seq=%d",
+                            str(payload.get("phase", "")),
+                            int(seq),
+                        )
                         break
                 else:
                     yield ":\n\n"
