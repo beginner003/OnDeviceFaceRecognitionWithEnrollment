@@ -26,5 +26,11 @@ venv/
 # Experiment artifacts
 experiments/**/logs/
 experiments/**/embeddings/
+experiments/**/checkpoints/
+experiments/**/checkpoint/
 experiments/**/workspace/
+
+# Face image data / enrollment artifacts
+data/val/
+data/ui_workspace/
 

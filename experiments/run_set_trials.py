@@ -110,9 +110,17 @@ def main() -> int:
             "(used for unknown-identity rejection tuning)."
         ),
     )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=None,
+        help="Optional epoch count forwarded to runners that support --epochs.",
+    )
     args = parser.parse_args()
     if not re.fullmatch(r"set\d+", str(args.set_name)):
         raise ValueError(f"Invalid --set-name {args.set_name!r}; expected pattern 'setN'.")
+    if args.epochs is not None and int(args.epochs) < 1:
+        raise ValueError("--epochs must be >= 1.")
 
     runner = Path(args.runner).expanduser().resolve()
     if not runner.is_file():
@@ -166,6 +174,8 @@ def main() -> int:
             cmd.extend(["--experiment-root", str(experiment_root)])
         if args.confidence_threshold is not None:
             cmd.extend(["--confidence-threshold", str(args.confidence_threshold)])
+        if args.epochs is not None:
+            cmd.extend(["--epochs", str(int(args.epochs))])
         if not args.reuse_embeddings:
             cmd.append("--overwrite-embeddings")
 

@@ -227,8 +227,13 @@
             const p = Math.round((100 * (data.current || 0)) / data.target);
             regBar.style.width = `${p}%`;
           }
+          if (data.phase === "captured") {
+            regBar.style.width = "100%";
+            setMode("recognition");
+          }
           if (data.phase === "training") {
             regBar.style.width = "100%";
+            setMode("recognition");
           }
           if (data.phase === "done") {
             regMsg.textContent = `Done: ${data.identity} · ${data.elapsed_s}s · ${data.total_identities} total · back to recognition`;

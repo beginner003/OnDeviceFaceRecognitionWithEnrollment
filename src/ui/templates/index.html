@@ -103,12 +103,12 @@
             <input type="text" name="name" id="regName" required maxlength="64" placeholder="e.g. alice" autocomplete="off" />
           </label>
           <label>
-            Total samples (≥6, split: face-on · turn left · turn right)
+            Total samples (>=6)
             <input type="number" name="n_frames" id="regFrames" min="6" max="120" value="24" />
           </label>
           <p class="fineprint">
-            Switch to <strong>Register</strong> mode for the live feed, then start — you will be asked to face the camera,
-            then turn slowly left, then right while we collect embeddings in RAM; one enroll call saves to disk.
+            We collect all samples first, then process registration in the background. Keep your face visible and
+            make slight left/right turns during capture for better variation.
           </p>
           <button type="submit" id="btnRegister">Start registration</button>
         </form>

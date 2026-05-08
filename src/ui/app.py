@@ -21,8 +21,7 @@ from pydantic import BaseModel, Field
 from src.ui.context import build_context, get_ctx, set_ctx
 
 from src.ui.registration_capture import (
-    collect_embeddings_for_pose,
-    quotas_three_way,
+    collect_registration_embeddings,
     registration_phase_instruction,
 )
 
@@ -38,7 +37,7 @@ class RegisterBody(BaseModel):
         24,
         ge=6,
         le=120,
-        description="Split across frontal + turn-left + turn-right capture.",
+        description="Collected first, then used for one background registration update.",
     )
 
 
@@ -122,34 +121,30 @@ def create_app() -> FastAPI:
                     labels = []
                     for det in detections:
                         text: Optional[str] = None
-                        if primary is not None and det is primary:
-                            try:
-                                artifact = ctx.pipeline.inspect_detection(bgr, det)
-                                with ctx.system_lock:
-                                    name, conf = ctx.system.recognize(artifact.embedding)
-                                if conf >= ctx.system.confidence_threshold:
-                                    text = f"{name} ({conf:.2f})"
-                                else:
-                                    text = f"unknown ({conf:.2f})"
+                        try:
+                            this_artifact = ctx.pipeline.inspect_detection(bgr, det)
+                            with ctx.system_lock:
+                                name, conf = ctx.system.recognize(this_artifact.embedding)
+                            if conf >= ctx.system.confidence_threshold:
+                                text = f"{name} ({conf:.2f})"
+                            else:
+                                text = f"unknown ({conf:.2f})"
+                            if primary is not None and det is primary:
+                                artifact = this_artifact
                                 recognition_payload = {
                                     "name": str(name),
                                     "confidence": round(float(conf), 4),
                                     "accepted": bool(conf >= ctx.system.confidence_threshold),
                                 }
-                            except Exception:
-                                text = "?"
-                                pipeline_error = "recognition failed"
+                        except Exception:
+                            text = "?"
+                            pipeline_error = "recognition failed"
                         labels.append(text)
                 elif mode == "register" and detections:
                     labels = [None] * len(detections)
                     for i, det in enumerate(detections):
                         if primary is not None and det is primary:
                             labels[i] = "enrollment"
-                    if primary is not None:
-                        try:
-                            artifact = ctx.pipeline.inspect_detection(bgr, primary)
-                        except Exception:
-                            pipeline_error = "alignment/embedding preview failed"
 
                 vis = ctx.pipeline.annotate_frame(bgr, detections, labels)
                 pipeline_payload = {
@@ -260,22 +255,12 @@ def create_app() -> FastAPI:
             time.sleep(0.15)
             embedding_session: List[np.ndarray] = []
             try:
-                try:
-                    qc, ql, qr = quotas_three_way(body.n_frames)
-                except ValueError as exc:
-                    ctx.bump_registration(phase="error", message=str(exc))
-                    _LOG.exception("registration quota split failed identity=%s", identity)
-                    return
-
                 total = body.n_frames
                 dup = float(os.environ.get("FACE_UI_REG_DEDUP_SIM", "0.995"))
                 _LOG.info(
-                    "registration worker start identity=%s total=%d quota(center,left,right)=(%d,%d,%d) dup=%.4f",
+                    "registration worker start identity=%s total=%d capture_first=true dup=%.4f",
                     identity,
                     int(total),
-                    int(qc),
-                    int(ql),
-                    int(qr),
                     float(dup),
                 )
 
@@ -286,81 +271,72 @@ def create_app() -> FastAPI:
                     phase="capturing",
                     current=0,
                     target=total,
-                    pose="center",
-                    instruction=registration_phase_instruction("center"),
+                    pose="capture",
+                    instruction=registration_phase_instruction(),
                     quota_phase_current=0,
-                    quota_phase_target=qc,
-                    message=registration_phase_instruction("center"),
+                    quota_phase_target=total,
+                    message=registration_phase_instruction(),
                 )
 
-                per_phase_stale = int(
+                capture_stale_limit = int(
                     os.environ.get(
-                        "FACE_UI_REG_STALE_PER_PHASE",
-                        str(max(400, body.n_frames * 80)),
+                        "FACE_UI_REG_STALE_TOTAL",
+                        str(max(900, body.n_frames * 130)),
                     )
                 )
-
-                for pose, quota in (("center", qc), ("left", ql), ("right", qr)):
-                    baseline = len(embedding_session)
-                    _LOG.info(
-                        "collect pose start identity=%s pose=%s quota=%d baseline=%d",
+                _LOG.info(
+                    "collect start identity=%s target=%d stale_limit=%d",
+                    identity,
+                    int(total),
+                    int(capture_stale_limit),
+                )
+                embedding_session = collect_registration_embeddings(
+                    capture=ctx.capture,
+                    detector=ctx.detector,
+                    pipeline=ctx.pipeline,
+                    target=total,
+                    similarity_dup=dup,
+                    stale_limit=capture_stale_limit,
+                    idle_sleep=float(os.environ.get("FACE_UI_REG_POLL_S", "0.02")),
+                    bump=bump_cb,
+                )
+                if len(embedding_session) < total:
+                    _LOG.warning(
+                        "collect incomplete identity=%s collected=%d target=%d",
                         identity,
-                        pose,
-                        int(quota),
-                        int(baseline),
+                        len(embedding_session),
+                        int(total),
                     )
-                    bucket = collect_embeddings_for_pose(
-                        capture=ctx.capture,
-                        detector=ctx.detector,
-                        pipeline=ctx.pipeline,
-                        pose=pose,
-                        quota=quota,
-                        total_target=total,
-                        baseline_collected=baseline,
-                        similarity_dup=dup,
-                        stale_limit=per_phase_stale,
-                        bump=bump_cb,
+                    ctx.bump_registration(
+                        phase="error",
+                        message=(
+                            f"Incomplete capture ({len(embedding_session)}/{total}). "
+                            "Improve lighting, move closer, and slightly rotate your head."
+                        ),
+                        instruction="",
                     )
-                    if len(bucket) < quota:
-                        _LOG.warning(
-                            "collect pose incomplete identity=%s pose=%s collected=%d quota=%d",
-                            identity,
-                            pose,
-                            len(bucket),
-                            int(quota),
-                        )
-                        ctx.bump_registration(
-                            phase="error",
-                            message=(
-                                f"Incomplete pose '{pose}' ({len(bucket)}/{quota}). "
-                                "Improve lighting / distance, rotate more slowly, or tune env "
-                                "FACE_UI_REG_YAW_CENTER_MAX / FACE_UI_REG_YAW_LEFT / "
-                                "FACE_UI_REG_YAW_RIGHT."
-                            ),
-                            instruction="",
-                        )
-                        return
-                    embedding_session.extend(bucket)
-                    _LOG.info(
-                        "collect pose done identity=%s pose=%s collected=%d/%d",
-                        identity,
-                        pose,
-                        len(bucket),
-                        int(quota),
-                    )
+                    return
 
                 emb_mat = np.stack(embedding_session, axis=0).astype(np.float32, copy=False)
                 embedding_session.clear()
+                ctx.bump_registration(
+                    phase="captured",
+                    instruction="Capture done. You can move away from the camera.",
+                    message="Capture complete. Processing registration in background…",
+                    current=total,
+                    target=total,
+                    return_to_recognition=True,
+                )
 
                 ctx.bump_registration(
                     phase="training",
-                    instruction="Saving to workspace…",
+                    instruction="Processing registration…",
                     message=(
-                        "Single registration update — replay methods persist exemplars and "
-                        "classifier checkpoints to disk."
+                        "Capture finished. Registering identity and saving workspace artifacts."
                     ),
                     current=total,
                     target=total,
+                    return_to_recognition=True,
                 )
 
                 try:

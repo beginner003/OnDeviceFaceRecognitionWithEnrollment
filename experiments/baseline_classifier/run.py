@@ -131,7 +131,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--confidence-threshold",
         type=float,
-        default=0.1,
+        default=0.5,
         help=(
             "Min max-softmax probability to accept a name (else 'unknown'). "
             "For K-way classifiers, max prob is often well below 0.5 even when top-1 is correct; "
@@ -141,7 +141,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--epochs",
         type=int,
-        default=10,
+        default=40,
         help="Number of SGD epochs for each incremental update (naive fine-tuning).",
     )
     parser.add_argument(

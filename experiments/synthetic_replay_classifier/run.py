@@ -138,7 +138,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--epochs",
         type=int,
-        default=30,
+        default=40,
         help="Number of SGD epochs for each incremental update.",
     )
     parser.add_argument(

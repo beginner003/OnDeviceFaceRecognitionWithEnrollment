@@ -21,7 +21,7 @@ class SyntheticReplayConfig:
 
     lr: float = 0.01
     momentum: float = 0.9
-    epochs: int = 10
+    epochs: int = 40
     batch_size: int = 32
     synthetic_samples_per_class: int = 50  # How many synthetic samples to generate per replay class
 

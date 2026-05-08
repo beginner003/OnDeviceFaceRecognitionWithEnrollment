@@ -27,7 +27,7 @@ After the Pi has the dataset, TFLite models, and dependencies installed:
 PYTHONPATH=. python experiments/run_all_pi_experiments.py
 ```
 
-This runs every experiment with `--reset-workspace --overwrite-embeddings` and writes a top-level refresh log to `experiments/logs/pi_experiment_refresh.log`. To renew only the evaluation logs while reusing cached embeddings:
+This runs every experiment with `--reset-workspace --overwrite-embeddings` and writes a top-level refresh log to `experiments/logs/pi_experiment_refresh.log`. Classifier-based continual learning methods are run with `--epochs 40` and unknown-identity rejection threshold `0.5` by default; override epochs with `--continual-epochs`. To renew only the evaluation logs while reusing cached embeddings:
 
 ```bash
 PYTHONPATH=. python experiments/run_all_pi_experiments.py --reuse-embeddings
@@ -77,7 +77,40 @@ Output log path (banner lines use the same `%(asctime)s | INFO |` style as `eval
 Options:
 - add `--reuse-embeddings` to skip `--overwrite-embeddings`,
 - add `--confidence-threshold <float>` to override the runner threshold (for unknown-ID rejection tuning),
+- add `--epochs <int>` to override the runner epoch count for classifier-based continual learning methods,
 - add `--experiment-root <path>` if you want a custom experiment root.
+
+---
+
+## Set 4 and Set 5 summary (3-trial averages)
+
+The following tables summarize the currently available consolidated set logs under `experiments/*/logs/sets/`. These are taken from each file's `SET SUMMARY` block (three trials averaged), then expanded with short interpretation notes.
+
+### Main accuracy and retention table
+
+| Set | Method | Avg accuracy | Avg forgetting | BWT | Mean run time / trial | Reading |
+|---|---|---:|---:|---:|---:|---|
+| set4 | `replay_classifier` | 0.9458 | 0.0508 | -0.0521 | 186.111 s | Strong old-class retention with moderate forgetting. |
+| set4 | `synthetic_replay_classifier` | 0.9750 | 0.0117 | -0.0120 | 334.842 s | Best set4 accuracy/retention among logged runs, with higher runtime. |
+| set5 | `lwf_classifier` | 0.0553 | 0.8773 | -0.8952 | 203.826 s | Severe forgetting/collapse in this configuration. |
+| set5 | `replay_lwf_classifier` | 0.8993 | 0.0920 | -0.0939 | 293.393 s | Balanced replay+distillation behavior, clearly better than no-replay LwF. |
+| set5 | `synthetic_replay_classifier` | 0.9627 | 0.0193 | -0.0197 | 509.907 s | Highest set5 accuracy among logged runs, but slowest runtime. |
+
+Notes:
+- No consolidated `set4.log` was found for `lwf_classifier` or `replay_lwf_classifier` in the current workspace.
+- No consolidated `set5.log` was found for `replay_classifier` in the current workspace.
+
+### Unknown-identity test table (separate)
+
+Values below are the mean of the three per-trial `unknown_rejection_accuracy` / `unknown_false_accept_rate` totals in each set log.
+
+| Set | Method | Unknown rejection accuracy (mean) | Unknown false accept rate (mean) | Reading |
+|---|---|---:|---:|---|
+| set4 | `replay_classifier` | 0.4600 | 0.5400 | Better unknown rejection than synthetic on set4, but still high false accepts. |
+| set4 | `synthetic_replay_classifier` | 0.4133 | 0.5867 | Unknown-ID filtering is weaker than its known-ID accuracy suggests. |
+| set5 | `lwf_classifier` | 0.0000 | 1.0000 | Rejects no unknowns (all unknowns accepted). |
+| set5 | `replay_lwf_classifier` | 0.3700 | 0.6300 | Partial rejection only; unknown robustness remains a bottleneck. |
+| set5 | `synthetic_replay_classifier` | 0.3633 | 0.6367 | Similar unknown-ID behavior to replay+LwF despite stronger known-ID accuracy. |
 
 ---
 
@@ -96,6 +129,7 @@ PYTHONPATH=. python experiments/baseline_classifier/run.py --reset-workspace
 | `--reset-workspace` | Delete the experiment workspace before running (recommended for a clean run). |
 | `--overwrite-embeddings` | Recompute embeddings even if cache exists. |
 | `--confidence-threshold FLOAT` | Recognition threshold (default: `0.5`). |
+| `--epochs INT` | Number of SGD epochs for each incremental update (default: `40`). |
 
 ---
 
@@ -133,8 +167,8 @@ PYTHONPATH=. python experiments/replay_classifier/run.py --reset-workspace
 | `--experiment-root PATH` | Experiment root directory (default: `experiments/replay_classifier`). |
 | `--reset-workspace` | Delete and recreate the `workspace/` directory before running. |
 | `--overwrite-embeddings` | Recompute embeddings even if cached data exists. |
-| `--confidence-threshold FLOAT` | Recognition threshold for classifier-based recognition (default: `0.1`). |
-| `--epochs INT` | Number of SGD epochs for each incremental update (default: `10`). |
+| `--confidence-threshold FLOAT` | Recognition threshold for classifier-based recognition (default: `0.5`). |
+| `--epochs INT` | Number of SGD epochs for each incremental update (default: `40`). |
 | `--batch-size INT` | SGD mini-batch size for each incremental update (default: `10`). |
 | `--max-new-exemplars INT` | Max sampled train embeddings from the newly registered identity (default: `50`). |
 | `--exemplar-k INT` | Number of exemplars stored per identity (default: `5`). |
@@ -155,8 +189,8 @@ PYTHONPATH=. python experiments/replay_lwf_classifier/run.py --reset-workspace
 | `--experiment-root PATH` | Experiment root directory (default: `experiments/replay_lwf_classifier`). |
 | `--reset-workspace` | Delete and recreate the `workspace/` directory before running. |
 | `--overwrite-embeddings` | Recompute embeddings even if cached data exists. |
-| `--confidence-threshold FLOAT` | Recognition threshold for classifier-based recognition (default: `0.1`). |
-| `--epochs INT` | Number of SGD epochs for each incremental update (default: `10`). |
+| `--confidence-threshold FLOAT` | Recognition threshold for classifier-based recognition (default: `0.5`). |
+| `--epochs INT` | Number of SGD epochs for each incremental update (default: `40`). |
 | `--batch-size INT` | SGD mini-batch size for each incremental update (default: `10`). |
 | `--temperature FLOAT` | Distillation temperature (default: `2.0`). |
 | `--distill-weight FLOAT` | Weight of the KL distillation term (default: `1.0`). |
@@ -180,8 +214,8 @@ PYTHONPATH=. python experiments/lwf_classifier/run.py --reset-workspace
 | `--experiment-root PATH` | Experiment root directory (default: `experiments/lwf_classifier`). |
 | `--reset-workspace` | Delete and recreate the `workspace/` directory before running. |
 | `--overwrite-embeddings` | Recompute embeddings even if cached data exists. |
-| `--confidence-threshold FLOAT` | Recognition threshold for classifier-based recognition (default: `0.1`). |
-| `--epochs INT` | Number of SGD epochs for each incremental update (default: `10`). |
+| `--confidence-threshold FLOAT` | Recognition threshold for classifier-based recognition (default: `0.5`). |
+| `--epochs INT` | Number of SGD epochs for each incremental update (default: `40`). |
 | `--batch-size INT` | SGD mini-batch size for each incremental update (default: `10`). |
 | `--temperature FLOAT` | Distillation temperature (default: `2.0`). |
 | `--distill-weight FLOAT` | Weight of the KL distillation term (default: `1.0`). |
@@ -210,8 +244,8 @@ PYTHONPATH=. python experiments/synthetic_replay_classifier/run.py --reset-works
 | `--experiment-root PATH` | Experiment root directory (default: `experiments/synthetic_replay_classifier`). |
 | `--reset-workspace` | Delete and recreate the `workspace/` directory before running. |
 | `--overwrite-embeddings` | Recompute embeddings even if cached data exists. |
-| `--confidence-threshold FLOAT` | Recognition threshold for classifier-based recognition (default: `0.1`). |
-| `--epochs INT` | Number of SGD epochs for each incremental update (default: `10`). |
+| `--confidence-threshold FLOAT` | Recognition threshold for classifier-based recognition (default: `0.5`). |
+| `--epochs INT` | Number of SGD epochs for each incremental update (default: `40`). |
 | `--batch-size INT` | SGD mini-batch size for each incremental update (default: `10`). |
 | `--synthetic-samples-per-class INT` | Synthetic replay samples generated per old class (default: `5`). |
 | `--exemplar-k INT` | Number of exemplars stored per identity for the system interface (default: `5`). In this experiment, Gaussian parameters are fit from the full embedding set, so `exemplar_k` does not limit the Gaussian fit. |

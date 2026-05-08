@@ -51,11 +51,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SUPERTASK_JSON = REPO_ROOT / "data" / "supertask_8_2.json"
 EXPERIMENT_ROOT = Path(__file__).resolve().parent
 
-EPOCHS = 10
+EPOCHS = 40
 BATCH_SIZE = 10
 TEMPERATURE = 2.0
 DISTILL_WEIGHT = 1.0
-CONFIDENCE_THRESHOLD = 0.1
+CONFIDENCE_THRESHOLD = 0.5
 MAX_NEW_EXEMPLARS = 50
 EXEMPLAR_K = 5
 SEED = 42

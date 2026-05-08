@@ -23,7 +23,7 @@ class LwFConfig:
 
     lr: float = 0.01
     momentum: float = 0.9
-    epochs: int = 10
+    epochs: int = 30
     batch_size: int = 32
     temperature: float = 2.0
     distill_weight: float = 1.0

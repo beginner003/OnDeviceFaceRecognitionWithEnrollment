@@ -21,7 +21,7 @@ class NaiveFTConfig:
 
     lr: float = 0.01
     momentum: float = 0.9
-    epochs: int = 5
+    epochs: int = 40
     batch_size: int = 32
 
 

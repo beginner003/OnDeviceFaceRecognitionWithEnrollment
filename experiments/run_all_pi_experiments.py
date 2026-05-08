@@ -23,14 +23,18 @@ EXPERIMENT_SCRIPTS = (
     Path("experiments/synthetic_replay_classifier/run.py"),
 )
 SET_NAMES = tuple(f"set{i}" for i in range(1, 11))
+CONTINUAL_LEARNING_EPOCHS = 40
 METHOD_CONFIDENCE_THRESHOLDS: dict[Path, float | None] = {
-    Path("experiments/baseline_classifier/run.py"): 0.3,
+    Path("experiments/baseline_classifier/run.py"): 0.5,
     Path("experiments/baseline_ncm/run.py"): None,  # NCM runner uses internal 0.5.
-    Path("experiments/replay_classifier/run.py"): 0.3,
-    Path("experiments/replay_lwf_classifier/run.py"): 0.3,
-    Path("experiments/lwf_classifier/run.py"): 0.3,
+    Path("experiments/replay_classifier/run.py"): 0.5,
+    Path("experiments/replay_lwf_classifier/run.py"): 0.5,
+    Path("experiments/lwf_classifier/run.py"): 0.5,
     Path("experiments/synthetic_replay_classifier/run.py"): 0.5,
 }
+CONTINUAL_LEARNING_METHODS = frozenset(
+    script for script in EXPERIMENT_SCRIPTS if script != Path("experiments/baseline_ncm/run.py")
+)
 
 
 def _repo_root() -> Path:
@@ -137,7 +141,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"(default: {len(EXPERIMENT_SCRIPTS)})."
         ),
     )
+    parser.add_argument(
+        "--continual-epochs",
+        type=int,
+        default=CONTINUAL_LEARNING_EPOCHS,
+        help=(
+            "Epochs forwarded to classifier-based continual learning runners "
+            f"(default: {CONTINUAL_LEARNING_EPOCHS})."
+        ),
+    )
     args = parser.parse_args(list(argv) if argv is not None else None)
+    if int(args.continual_epochs) < 1:
+        raise ValueError("--continual-epochs must be >= 1.")
 
     _require_pi_linux()
     repo_root = _repo_root()
@@ -159,6 +174,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             threshold = METHOD_CONFIDENCE_THRESHOLDS.get(script)
             if threshold is not None:
                 cmd.extend(["--confidence-threshold", str(threshold)])
+            if script in CONTINUAL_LEARNING_METHODS:
+                cmd.extend(["--epochs", str(int(args.continual_epochs))])
             exit_code = _run_command(cmd, repo_root=repo_root, log_path=run_log)
             if exit_code != 0:
                 return exit_code
@@ -198,6 +215,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 threshold = METHOD_CONFIDENCE_THRESHOLDS.get(script)
                 if threshold is not None:
                     cmd.extend(["--confidence-threshold", str(threshold)])
+                if script in CONTINUAL_LEARNING_METHODS:
+                    cmd.extend(["--epochs", str(int(args.continual_epochs))])
                 if args.reuse_embeddings:
                     cmd.append("--reuse-embeddings")
                 future = executor.submit(

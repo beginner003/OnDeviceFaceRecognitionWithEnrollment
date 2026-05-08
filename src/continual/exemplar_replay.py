@@ -21,8 +21,14 @@ class ExemplarReplayConfig:
 
     lr: float = 0.01
     momentum: float = 0.9
-    epochs: int = 10
+    epochs: int = 40
     batch_size: int = 32
+
+
+def _resolve_old_identity_order(class_names: list[str] | None, store: ExemplarStore) -> list[str]:
+    if isinstance(class_names, list) and class_names:
+        return [str(name) for name in class_names]
+    return [str(name) for name in store.identities()]
 
 
 def incremental_train_replay(
@@ -44,6 +50,11 @@ def incremental_train_replay(
     cfg = config or ExemplarReplayConfig()
     dev = torch.device(device or "cpu")
     classifier = classifier.to(dev)
+    old_class_names = getattr(classifier, "_class_names", None)
+    if isinstance(old_class_names, list):
+        old_class_names = [str(name) for name in old_class_names]
+    else:
+        old_class_names = None
 
     emb = np.asarray(new_embeddings, dtype=np.float32)
     if emb.ndim != 2 or emb.shape[1] != classifier.in_features:
@@ -59,9 +70,13 @@ def incremental_train_replay(
 
     all_x, all_y = [], []
 
-    # Replay: gather stored exemplars for all previously registered classes
-    for cls_idx, ident in enumerate(store.identities()):
+    # Replay: gather stored exemplars while preserving existing class-index order.
+    available_identities = set(store.identities())
+    old_order = _resolve_old_identity_order(class_names=old_class_names, store=store)
+    for cls_idx, ident in enumerate(old_order):
         if ident == identity:
+            continue
+        if ident not in available_identities:
             continue
         stored = store.get(ident).embeddings.astype(np.float32)
         all_x.append(stored)

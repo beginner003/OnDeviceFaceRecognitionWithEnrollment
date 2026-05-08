@@ -1,3 +1,8 @@
 {
-  "identity_to_class": {}
+  "identity_to_class": {
+    "Yoyo": 0,
+    "Leo": 1,
+    "Charles": 2,
+    "professor": 3
+  }
 }
